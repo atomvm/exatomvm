@@ -34,10 +34,11 @@ defmodule ExAtomVM.PackBEAM do
   end
 
   defp transform(beam_bytes) do
-    with {:ok, _module_name, chunks} <- :beam_lib.all_chunks(beam_bytes),
+    with {:ok, module_name, chunks} <- :beam_lib.all_chunks(beam_bytes),
          u_chunks = uncompress_literals(chunks),
-         s_chunks = strip(u_chunks) do
-      :beam_lib.build_module(s_chunks)
+         s_chunks = strip(u_chunks),
+         {:ok, bytes} <- :beam_lib.build_module(s_chunks) do
+      {:ok, module_name, bytes}
     end
   end
 
@@ -67,28 +68,51 @@ defmodule ExAtomVM.PackBEAM do
     end
   end
 
-  defp pack_modules(modules) do
+  defp pack_module(module, opts) do
+    with {:ok, beam_bytes} <- File.read(module),
+         {:ok, module_atom, transformed_module} <- transform(beam_bytes) do
+      module_name = "#{Atom.to_string(module_atom)}.beam"
+      header_size = section_header_size(module_name)
+      {header_padding, header_padding_size} = padding(header_size)
+      {beam_padding, beam_padding_size} = padding(byte_size(transformed_module))
+
+      size = header_size + header_padding_size + byte_size(transformed_module) + beam_padding_size
+
+      header = section_header(module_name, opts, size)
+      {:ok, [header, header_padding, transformed_module, beam_padding]}
+    end
+  end
+
+  def extract_avm_content(avm_file) do
+    with {:ok, avm_bytes} <- File.read(avm_file),
+         <<@avm_header, without_header::binary>> <- avm_bytes do
+      without_header_size = byte_size(without_header)
+      end_header_size = byte_size(section_header("end", :eof, 0))
+
+      {:ok, :binary.part(without_header, 0, without_header_size - end_header_size)}
+    end
+  end
+
+  defp pack_file(file, opts) do
+    cond do
+      String.ends_with?(file, ".beam") ->
+        pack_module(file, opts)
+
+      String.ends_with?(file, ".avm") ->
+        extract_avm_content(file)
+    end
+  end
+
+  defp pack_files(modules) do
     Enum.reduce_while(modules, {:ok, []}, fn {module, opts}, {:ok, acc} ->
-      with {:ok, beam_bytes} <- File.read(module),
-           {:ok, transformed_module} <- transform(beam_bytes) do
-        header_size = section_header_size(module)
-        {header_padding, header_padding_size} = padding(header_size)
-        {beam_padding, beam_padding_size} = padding(byte_size(transformed_module))
-
-        size =
-          header_size + header_padding_size + byte_size(transformed_module) + beam_padding_size
-
-        header = section_header(module, opts, size)
-
-        {:cont, {:ok, [acc | [header, header_padding, transformed_module, beam_padding]]}}
-      else
-        error ->
-          {:halt, error}
+      case pack_file(module, opts) do
+        {:ok, res} -> {:cont, {:ok, [acc | res]}}
+        error -> {:halt, error}
       end
     end)
   end
 
-  def make_avm(modules) do
+  defp make_avm(modules) do
     [startup | tail] = modules
 
     tail_modules_with_opts =
@@ -98,7 +122,7 @@ defmodule ExAtomVM.PackBEAM do
 
     modules_with_opts = [{startup, :beam_start} | tail_modules_with_opts]
 
-    with {:ok, packed} <- pack_modules(modules_with_opts) do
+    with {:ok, packed} <- pack_files(modules_with_opts) do
       {:ok, [@avm_header, packed, section_header("end", :eof, 0)]}
     end
   end

@@ -1,17 +1,8 @@
 defmodule Mix.Tasks.Atomvm.Packbeam do
   use Mix.Task
+  alias ExAtomVM.PackBEAM
   alias Mix.Project
   alias Mix.Tasks.Atomvm.Check
-
-  defp packbeam(files, out) do
-    with {_out, 0} <- System.cmd("PackBEAM", [out | files], stderr_to_stdout: true) do
-      :ok
-    else
-      {out, _} ->
-        IO.puts("PackBEAM failed with error: #{inspect(out)}")
-        :error
-    end
-  end
 
   def run(args) do
     with {:check, {:ok, _}} <- {:check, Check.run(args)},
@@ -26,7 +17,7 @@ defmodule Mix.Tasks.Atomvm.Packbeam do
       avms_path
       |> File.ls!()
       |> Enum.map(fn file -> Path.join(avms_path, file) end)
-      |> packbeam("deps.avm")
+      |> PackBEAM.make_avm("deps.avm")
 
       Project.compile_path()
       |> File.ls!()
@@ -35,7 +26,7 @@ defmodule Mix.Tasks.Atomvm.Packbeam do
       |> List.insert_at(0, start_beam_file)
       |> Enum.map(fn file -> Path.join(Project.compile_path(), file) end)
       |> Enum.concat(["deps.avm"])
-      |> packbeam("#{config[:app]}.avm")
+      |> PackBEAM.make_avm("#{config[:app]}.avm")
 
       {:ok, []}
     else
