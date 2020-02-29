@@ -9,8 +9,7 @@ defmodule Mix.Tasks.Atomvm.Packbeam do
          config = Project.config(),
          {:atomvm, {:ok, avm_config}} <- {:atomvm, Keyword.fetch(config, :atomvm)},
          {:start, {:ok, start_module}} <- {:start, Keyword.fetch(avm_config, :start)},
-         install_prefix when install_prefix != nil <- System.get_env("ATOMVM_INSTALL_PREFIX"),
-         avms_path = Path.join(install_prefix, "lib/AtomVM/ebin/"),
+         {:ok, avms_path} <- avm_deps_path(),
          :ok <- pack_deps(avms_path),
          start_beam_file = "#{Atom.to_string(start_module)}.beam",
          :ok <- pack_beams(Project.compile_path(), start_beam_file, "#{config[:app]}.avm") do
@@ -54,5 +53,26 @@ defmodule Mix.Tasks.Atomvm.Packbeam do
     |> Enum.map(fn file -> Path.join(Project.compile_path(), file) end)
     |> Enum.concat(["deps.avm"])
     |> PackBEAM.make_avm(out)
+  end
+
+  defp avm_deps_path() do
+    deps_path = Project.deps_path()
+
+    with true <- String.ends_with?(deps_path, "/deps"),
+         deps_len = String.length(deps_path),
+         prj_path = String.slice(deps_path, 0, deps_len - 5),
+         avm_deps_path = Path.join(prj_path, "/avm_deps"),
+         true <- File.exists?(avm_deps_path) do
+      {:ok, avm_deps_path}
+    else
+      _ ->
+        with prefix when prefix != nil <- System.get_env("ATOMVM_INSTALL_PREFIX"),
+             true <- File.exists?(prefix) do
+          {:ok, Path.join(prefix, "lib/AtomVM/ebin/")}
+        else
+          _ ->
+            {:error, :no_avm_deps_path}
+        end
+    end
   end
 end
