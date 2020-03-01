@@ -93,6 +93,21 @@ defmodule ExAtomVM.PackBEAM do
     end
   end
 
+  defp pack_any_file(file_path, opts) do
+    with {:ok, file_bytes} <- File.read(file_path),
+         {:ok, filename} <- Keyword.fetch(opts, :file) do
+      header_size = section_header_size(filename)
+      {header_padding, header_padding_size} = padding(header_size)
+      {beam_padding, beam_padding_size} = padding(byte_size(file_bytes))
+
+      file_size = byte_size(file_bytes)
+      size = header_size + header_padding_size + 4 + file_size + beam_padding_size
+
+      header = section_header(filename, :beam, size)
+      {:ok, [header, header_padding, <<file_size::32-big>>, file_bytes, beam_padding]}
+    end
+  end
+
   defp pack_file(file, opts) do
     cond do
       String.ends_with?(file, ".beam") ->
@@ -100,6 +115,9 @@ defmodule ExAtomVM.PackBEAM do
 
       String.ends_with?(file, ".avm") ->
         extract_avm_content(file)
+
+      true ->
+        pack_any_file(file, opts)
     end
   end
 

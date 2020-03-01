@@ -11,6 +11,7 @@ defmodule Mix.Tasks.Atomvm.Packbeam do
          {:start, {:ok, start_module}} <- {:start, Keyword.fetch(avm_config, :start)},
          {:ok, avms_path} <- avm_deps_path(),
          :ok <- pack_deps(avms_path),
+         :ok <- pack_priv(),
          start_beam_file = "#{Atom.to_string(start_module)}.beam",
          :ok <- pack_beams(Project.compile_path(), start_beam_file, "#{config[:app]}.avm") do
       {:ok, []}
@@ -44,6 +45,31 @@ defmodule Mix.Tasks.Atomvm.Packbeam do
     |> PackBEAM.make_avm("deps.avm")
   end
 
+  defp pack_priv() do
+    priv_dir_path =
+      Project.config()[:app]
+      |> Application.app_dir("priv")
+
+    packbeam_inputs =
+      case File.exists?(priv_dir_path) do
+        true ->
+          prefix =
+            Project.config()[:app]
+            |> Atom.to_string()
+            |> Path.join("priv")
+
+          priv_dir_path
+          |> File.ls!()
+          |> Enum.map(fn file -> {file, [file: Path.join(prefix, file)]} end)
+          |> Enum.map(fn {file, opts} -> {Path.join(priv_dir_path, file), opts} end)
+
+        false ->
+          []
+      end
+
+    PackBEAM.make_avm(packbeam_inputs, "priv.avm")
+  end
+
   defp pack_beams(beams_path, start_beam_file, out) do
     beams_path
     |> File.ls!()
@@ -52,7 +78,7 @@ defmodule Mix.Tasks.Atomvm.Packbeam do
     |> Enum.map(fn file -> {file, :beam} end)
     |> List.insert_at(0, {start_beam_file, :beam_start})
     |> Enum.map(fn {file, opts} -> {Path.join(Project.compile_path(), file), opts} end)
-    |> Enum.concat([{"deps.avm", :avm}])
+    |> Enum.concat([{"deps.avm", :avm}, {"priv.avm", :avm}])
     |> PackBEAM.make_avm(out)
   end
 
