@@ -113,16 +113,7 @@ defmodule ExAtomVM.PackBEAM do
   end
 
   defp make_avm(modules) do
-    [startup | tail] = modules
-
-    tail_modules_with_opts =
-      Enum.map(tail, fn module ->
-        {module, :beam}
-      end)
-
-    modules_with_opts = [{startup, :beam_start} | tail_modules_with_opts]
-
-    with {:ok, packed} <- pack_files(modules_with_opts) do
+    with {:ok, packed} <- pack_files(modules) do
       {:ok, [@avm_header, packed, section_header("end", :eof, 0)]}
     end
   end

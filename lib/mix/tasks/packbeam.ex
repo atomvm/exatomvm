@@ -40,7 +40,7 @@ defmodule Mix.Tasks.Atomvm.Packbeam do
   defp pack_deps(avms_path) do
     avms_path
     |> File.ls!()
-    |> Enum.map(fn file -> Path.join(avms_path, file) end)
+    |> Enum.map(fn file -> {Path.join(avms_path, file), :avm} end)
     |> PackBEAM.make_avm("deps.avm")
   end
 
@@ -49,9 +49,10 @@ defmodule Mix.Tasks.Atomvm.Packbeam do
     |> File.ls!()
     |> Enum.filter(fn file -> String.ends_with?(file, ".beam") end)
     |> List.delete(start_beam_file)
-    |> List.insert_at(0, start_beam_file)
-    |> Enum.map(fn file -> Path.join(Project.compile_path(), file) end)
-    |> Enum.concat(["deps.avm"])
+    |> Enum.map(fn file -> {file, :beam} end)
+    |> List.insert_at(0, {start_beam_file, :beam_start})
+    |> Enum.map(fn {file, opts} -> {Path.join(Project.compile_path(), file), opts} end)
+    |> Enum.concat([{"deps.avm", :avm}])
     |> PackBEAM.make_avm(out)
   end
 
