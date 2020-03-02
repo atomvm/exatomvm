@@ -101,6 +101,7 @@ erlang:ref_to_list/1
 erlang:fun_to_list/1
 erlang:!/2
 erts_debug:flat_size/1
+atomvm:read_priv/2
 calendar:date_to_gregorian_days/1
 calendar:date_to_gregorian_days/3
 calendar:day_of_the_week/1
