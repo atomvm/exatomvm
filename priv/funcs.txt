@@ -298,3 +298,7 @@ Elixir.GPIO:set_level/3
 #######
 erlang:get_module_info/1
 erlang:get_module_info/2
+#######
+atomvm:platform/0
+uart:open/2
+uart:read/1
