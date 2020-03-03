@@ -6,10 +6,18 @@ defmodule Mix.Tasks.Atomvm.Esp32.Flash do
   @esp_tool_path "/components/esptool_py/esptool/esptool.py"
 
   def run(args) do
-    with {:pack, {:ok, _}} <- {:pack, Packbeam.run(args)},
+    config = Project.config()
+
+    with {:atomvm, {:ok, avm_config}} <- {:atomvm, Keyword.fetch(config, :atomvm)},
+         {:pack, {:ok, _}} <- {:pack, Packbeam.run(args)},
          idf_path when idf_path != nil <- System.get_env("IDF_PATH") do
-      flash(idf_path)
+      flash_offset = Keyword.get(avm_config, :flash_offset, 0x110000)
+      flash(idf_path, flash_offset)
     else
+      {:atomvm, :error} ->
+        IO.puts("error: missing AtomVM project config.")
+        :error
+
       {:pack, _} ->
         IO.puts("error: failed PackBEAM, target will not be flashed.")
         :error
@@ -20,7 +28,7 @@ defmodule Mix.Tasks.Atomvm.Esp32.Flash do
     end
   end
 
-  def flash(idf_path) do
+  def flash(idf_path, flash_offset) do
     tool_args = [
       "--chip",
       "esp32",
@@ -40,7 +48,7 @@ defmodule Mix.Tasks.Atomvm.Esp32.Flash do
       "40m",
       "--flash_size",
       "detect",
-      "0x110000",
+      "0x#{Integer.to_string(flash_offset, 16)}",
       "#{Project.config()[:app]}.avm"
     ]
 
