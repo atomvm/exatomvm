@@ -20,8 +20,8 @@ return
 send
 remove_message
 timeout
-lorec
-lorec_end
+loop_rec
+loop_rec_end
 wait
 wait_timeout
 is_lt
