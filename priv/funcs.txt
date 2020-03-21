@@ -201,6 +201,7 @@ timer:module_info/1
 timer:sleep/1
 Elixir.Access:fetch!/2
 Elixir.Access:fetch/2
+Elixir.Access:get/2
 Elixir.Access:get/3
 Elixir.Access:__info__/1
 Elixir.Access:module_info/0
