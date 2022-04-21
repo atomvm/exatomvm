@@ -46,6 +46,8 @@ test_arity
 select_val
 select_tuple_arity
 jump
+catch
+catch_end
 move
 get_list
 get_tuple_element
@@ -67,6 +69,7 @@ try
 try_end
 try_case
 try_case_end
+raise
 bs_init2
 bs_add
 apply
@@ -78,9 +81,11 @@ bs_get_integer2
 bs_get_binary2
 bs_skip_bits2
 bs_test_tail2
+bs_save2
 bs_restore2
 gc_bif1
 gc_bif2
+is_bitstr
 bs_context_to_binary
 bs_test_unit
 bs_match_string
@@ -91,7 +96,11 @@ recv_mark
 recv_set
 gc_bif3
 line
+put_map_assoc
+put_map_exact
 is_map
+has_map_fields
+get_map_elements
 is_tagged_tuple
 get_hd
 get_tl
@@ -100,3 +109,5 @@ bs_get_tail
 bs_start_match3
 bs_get_position
 bs_set_position
+swap
+bs_start_match4
