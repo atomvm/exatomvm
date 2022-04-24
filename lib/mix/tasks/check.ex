@@ -96,7 +96,7 @@ defmodule Mix.Tasks.Atomvm.Check do
     {module_name, ext_calls}
   end
 
-  defp extract_exported({:beam_file, module_name, exported_funcs, _, _, _code}) do
+  def extract_exported({:beam_file, module_name, exported_funcs, _, _, _code}) do
     funcs =
       Enum.map(exported_funcs, fn {func_name, arity, _} ->
         "#{Atom.to_string(module_name)}:#{func_name}/#{arity}"
@@ -106,7 +106,7 @@ defmodule Mix.Tasks.Atomvm.Check do
     {module_name, funcs}
   end
 
-  defp extract_exported(path) do
+  def extract_exported(path) do
     files = list_beam_files(path)
 
     exported_by_mod =
