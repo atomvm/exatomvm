@@ -193,6 +193,8 @@ console:puts/2
 console:start/0
 erlang:apply/3
 erlang:cancel_timer/1
+erlang:get_module_info/1
+erlang:get_module_info/2
 erlang:is_map/1
 erlang:map_get/2
 erlang:map_is_key/2
