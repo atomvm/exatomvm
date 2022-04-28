@@ -39,10 +39,24 @@ defmodule Mix.Tasks.Atomvm.Packbeam do
   end
 
   defp pack_deps(avms_path) do
-    avms_path
-    |> File.ls!()
-    |> Enum.map(fn file -> {Path.join(avms_path, file), :avm} end)
-    |> PackBEAM.make_avm("deps.avm")
+    deps_beams =
+      Mix.Dep.cached()
+      |> runtime_deps()
+      |> Enum.reduce([], fn path, acc -> beam_files(path) ++ acc end)
+      |> Enum.map(fn beam_file -> {beam_file, :beam} end)
+
+    deps_avms =
+      avms_path
+      |> File.ls!()
+      |> Enum.map(fn file -> {Path.join(avms_path, file), :avm} end)
+
+    PackBEAM.make_avm(deps_beams ++ deps_avms, "deps.avm")
+  end
+
+  defp beam_files(path) do
+    for file <- File.ls!(path), String.ends_with?(file, ".beam") do
+      Path.join(path, file)
+    end
   end
 
   defp pack_priv() do
@@ -101,5 +115,15 @@ defmodule Mix.Tasks.Atomvm.Packbeam do
             {:error, :no_avm_deps_path}
         end
     end
+  end
+
+  def runtime_deps(deps) do
+    Enum.reduce(deps, [], fn dep, acc ->
+      if Keyword.get(dep.opts, :runtime, true) do
+        ["#{dep.opts[:build]}/ebin" | runtime_deps(dep.deps) ++ acc]
+      else
+        []
+      end
+    end)
   end
 end
