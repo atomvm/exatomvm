@@ -106,13 +106,9 @@ defmodule Mix.Tasks.Atomvm.Check do
     {module_name, funcs}
   end
 
-  def extract_exported(path) do
-    files = list_beam_files(path)
-
+  def extract_exported(files) when is_list(files) do
     exported_by_mod =
-      Enum.reduce(files, %{}, fn filename, acc ->
-        file_path = Path.join(path, filename)
-
+      Enum.reduce(files, %{}, fn file_path, acc ->
         {module_name, exported} =
           File.read!(file_path)
           |> :beam_disasm.file()
@@ -126,6 +122,11 @@ defmodule Mix.Tasks.Atomvm.Check do
     |> List.flatten()
     |> Enum.uniq()
     |> Enum.into(MapSet.new())
+  end
+
+  def extract_exported(path) do
+    Mix.Tasks.Atomvm.Packbeam.beam_files(path)
+    |> extract_exported()
   end
 
   defp extract_calls(path) do
@@ -153,7 +154,10 @@ defmodule Mix.Tasks.Atomvm.Check do
 
   defp check_ext_calls(beams_path) do
     calls_set = extract_calls(beams_path)
-    exported_calls_set = extract_exported(beams_path)
+    runtime_deps_beams = Mix.Tasks.Atomvm.Packbeam.runtime_deps_beams()
+
+    exported_calls_set =
+      MapSet.union(extract_exported(beams_path), extract_exported(runtime_deps_beams))
 
     avail_funcs =
       Path.join(:code.priv_dir(:exatomvm), "funcs.txt")

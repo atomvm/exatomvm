@@ -39,21 +39,19 @@ defmodule Mix.Tasks.Atomvm.Packbeam do
   end
 
   defp pack_deps(avms_path) do
-    deps_beams =
-      Mix.Dep.cached()
-      |> runtime_deps()
-      |> Enum.reduce([], fn path, acc -> beam_files(path) ++ acc end)
-      |> Enum.map(fn beam_file -> {beam_file, :beam} end)
-
     deps_avms =
       avms_path
       |> File.ls!()
       |> Enum.map(fn file -> {Path.join(avms_path, file), :avm} end)
 
+    deps_beams =
+      runtime_deps_beams()
+      |> Enum.map(fn beam_file -> {beam_file, :beam} end)
+
     PackBEAM.make_avm(deps_beams ++ deps_avms, "deps.avm")
   end
 
-  defp beam_files(path) do
+  def beam_files(path) do
     for file <- File.ls!(path), String.ends_with?(file, ".beam") do
       Path.join(path, file)
     end
@@ -125,5 +123,11 @@ defmodule Mix.Tasks.Atomvm.Packbeam do
         []
       end
     end)
+  end
+
+  def runtime_deps_beams() do
+    Mix.Dep.cached()
+    |> runtime_deps()
+    |> Enum.reduce([], fn path, acc -> beam_files(path) ++ acc end)
   end
 end
