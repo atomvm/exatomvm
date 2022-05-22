@@ -80,6 +80,14 @@ defmodule ExAtomVM.PackBEAM do
 
       header = section_header(module_name, opts, size)
       {:ok, [header, header_padding, transformed_module, beam_padding]}
+    else
+      {:error, :enoent} = error ->
+        IO.puts(:stderr, "Cannot find #{module}. Wrong module name?")
+        error
+
+      {:error, _} = error ->
+        IO.puts(:stderr, "Cannot pack #{module}.")
+        error
     end
   end
 
