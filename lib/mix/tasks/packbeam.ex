@@ -9,8 +9,7 @@ defmodule Mix.Tasks.Atomvm.Packbeam do
          config = Project.config(),
          {:atomvm, {:ok, avm_config}} <- {:atomvm, Keyword.fetch(config, :atomvm)},
          {:start, {:ok, start_module}} <- {:start, Keyword.fetch(avm_config, :start)},
-         {:ok, avms_path} <- avm_deps_path(),
-         :ok <- pack_deps(avms_path),
+         :ok <- pack_avm_deps(),
          :ok <- pack_priv(),
          start_beam_file = "#{Atom.to_string(start_module)}.beam",
          :ok <- pack_beams(Project.compile_path(), start_beam_file, "#{config[:app]}.avm") do
@@ -35,6 +34,21 @@ defmodule Mix.Tasks.Atomvm.Packbeam do
       error ->
         IO.puts("error: unexpected error: #{inspect(error)}.")
         :error
+    end
+  end
+
+  defp pack_avm_deps() do
+    case avm_deps_path() do
+      {:ok, avms_path} ->
+        pack_deps(avms_path)
+
+      {:error, :no_avm_deps_path} ->
+        # Let's completely skip this instead of building an empty avm file
+        PackBEAM.make_avm([], "priv.avm")
+        :ok
+
+      any ->
+        any
     end
   end
 
@@ -110,6 +124,12 @@ defmodule Mix.Tasks.Atomvm.Packbeam do
           {:ok, Path.join(prefix, "lib/AtomVM/ebin/")}
         else
           _ ->
+            IO.puts("No avm_deps directory found.")
+
+            IO.puts(
+              "This message can be safely ignored when standard libraries are already flashed to lib partition."
+            )
+
             {:error, :no_avm_deps_path}
         end
     end
