@@ -44,7 +44,7 @@ defmodule Mix.Tasks.Atomvm.Packbeam do
 
       {:error, :no_avm_deps_path} ->
         # Let's completely skip this instead of building an empty avm file
-        PackBEAM.make_avm([], "priv.avm")
+        PackBEAM.make_avm([], "deps.avm")
         :ok
 
       any ->
