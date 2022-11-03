@@ -97,6 +97,7 @@ erlang:spawn/3
 erlang:spawn_opt/2
 erlang:spawn_opt/4
 erlang:system_info/1
+erlang:unregister/1
 erlang:whereis/1
 erlang:++/2
 erlang:system_time/1
