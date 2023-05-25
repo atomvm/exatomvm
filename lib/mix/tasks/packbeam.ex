@@ -6,9 +6,10 @@ defmodule Mix.Tasks.Atomvm.Packbeam do
 
   def run(args) do
     with {:check, {:ok, _}} <- {:check, Check.run(args)},
+         {:args, {:ok, options}} <- {:args, parse_args(args)},
          config = Project.config(),
          {:atomvm, {:ok, avm_config}} <- {:atomvm, Keyword.fetch(config, :atomvm)},
-         {:start, {:ok, start_module}} <- {:start, Keyword.fetch(avm_config, :start)},
+         {:start, {:ok, start_module}} <- {:start, Map.get(options, :start, Keyword.fetch(avm_config, :start))},
          :ok <- pack_avm_deps(),
          :ok <- pack_priv(),
          start_beam_file = "#{Atom.to_string(start_module)}.beam",
@@ -149,5 +150,21 @@ defmodule Mix.Tasks.Atomvm.Packbeam do
     Mix.Dep.cached()
     |> runtime_deps()
     |> Enum.reduce([], fn path, acc -> beam_files(path) ++ acc end)
+  end
+
+  defp parse_args(args) do
+    parse_args(args, %{})
+  end
+
+  defp parse_args([], accum) do
+    {:ok, accum}
+  end
+
+  defp parse_args([<<"--start">>, start | t], accum) do
+    parse_args(t, Map.put(accum, :start, start))
+  end
+
+  defp parse_args([_|t], accum) do
+    parse_args(t, accum)
   end
 end
