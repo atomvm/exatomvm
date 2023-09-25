@@ -39,31 +39,30 @@ defmodule Mix.Tasks.Atomvm.Packbeam do
   end
 
   defp pack_avm_deps() do
+    dep_beams = list_dep_beams()
+
     case avm_deps_path() do
-      {:ok, avms_path} ->
-        pack_deps(avms_path)
+      {:ok, avm_path} ->
+        dep_avms = list_dep_avms(avm_path)
+        PackBEAM.make_avm(dep_beams ++ dep_avms, "deps.avm")
 
       {:error, :no_avm_deps_path} ->
-        # Let's completely skip this instead of building an empty avm file
-        PackBEAM.make_avm([], "deps.avm")
-        :ok
+        PackBEAM.make_avm(dep_beams, "deps.avm")
 
       any ->
         any
     end
   end
 
-  defp pack_deps(avms_path) do
-    deps_avms =
-      avms_path
-      |> File.ls!()
-      |> Enum.map(fn file -> {Path.join(avms_path, file), :avm} end)
+  defp list_dep_avms(avm_path) do
+    avm_path
+    |> File.ls!()
+    |> Enum.map(fn file -> {Path.join(avm_path, file), :avm} end)
+  end
 
-    deps_beams =
-      runtime_deps_beams()
-      |> Enum.map(fn beam_file -> {beam_file, :beam} end)
-
-    PackBEAM.make_avm(deps_beams ++ deps_avms, "deps.avm")
+  defp list_dep_beams() do
+    runtime_deps_beams()
+    |> Enum.map(fn beam_file -> {beam_file, :beam} end)
   end
 
   def beam_files(path) do
