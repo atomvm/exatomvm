@@ -86,15 +86,37 @@ defmodule Mix.Tasks.Atomvm.Packbeam do
             |> Path.join("priv")
 
           priv_dir_path
-          |> File.ls!()
-          |> Enum.map(fn file -> {file, [file: Path.join(prefix, file)]} end)
-          |> Enum.map(fn {file, opts} -> {Path.join(priv_dir_path, file), opts} end)
+          |> get_all_files()
+          |> Enum.map(fn file ->
+            {file, [file: Path.join(prefix, Path.relative_to(file, priv_dir_path))]}
+          end)
 
         false ->
           []
       end
 
     PackBEAM.make_avm(packbeam_inputs, "priv.avm")
+  end
+
+  defp get_all_files(dir) do
+    all_files = Path.wildcard(Path.join(dir, "*"))
+
+    regular_files =
+      Enum.filter(all_files, fn path ->
+        File.regular?(path)
+      end)
+
+    sub_dirs =
+      Enum.filter(all_files, fn path ->
+        File.dir?(path)
+      end)
+
+    sub_files =
+      Enum.reduce(sub_dirs, [], fn sub_dir, accum ->
+        get_all_files(sub_dir) ++ accum
+      end)
+
+    regular_files ++ sub_files
   end
 
   defp pack_beams(beams_path, start_beam_file, out) do
