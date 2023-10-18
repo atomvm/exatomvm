@@ -15,7 +15,10 @@ defmodule Mix.Tasks.Atomvm.Esp32.Flash do
       chip = Map.get(options, :chip, Keyword.get(avm_config, :chip, "esp32"))
       port = Map.get(options, :port, Keyword.get(avm_config, :port, "/dev/ttyUSB0"))
       baud = Map.get(options, :baud, Keyword.get(avm_config, :baud, "115200"))
-      flash_offset = Map.get(options, :flash_offset, Keyword.get(avm_config, :flash_offset, 0x210000))
+
+      flash_offset =
+        Map.get(options, :flash_offset, Keyword.get(avm_config, :flash_offset, 0x210000))
+
       flash(idf_path, chip, port, baud, flash_offset)
     else
       {:atomvm, :error} ->
@@ -55,6 +58,7 @@ defmodule Mix.Tasks.Atomvm.Esp32.Flash do
       "0x#{Integer.to_string(flash_offset, 16)}",
       "#{Project.config()[:app]}.avm"
     ]
+
     tool_full_path = get_esptool_path(idf_path)
     System.cmd(tool_full_path, tool_args, stderr_to_stdout: true, into: IO.stream(:stdio, 1))
   end
@@ -91,7 +95,7 @@ defmodule Mix.Tasks.Atomvm.Esp32.Flash do
     parse_args(t, Map.put(accum, :flash_offset, flash_offset))
   end
 
-  defp parse_args([_|t], accum) do
+  defp parse_args([_ | t], accum) do
     parse_args(t, accum)
   end
 end

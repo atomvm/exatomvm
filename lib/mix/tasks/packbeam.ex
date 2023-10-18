@@ -9,7 +9,8 @@ defmodule Mix.Tasks.Atomvm.Packbeam do
          {:args, {:ok, options}} <- {:args, parse_args(args)},
          config = Project.config(),
          {:atomvm, {:ok, avm_config}} <- {:atomvm, Keyword.fetch(config, :atomvm)},
-         {:start, {:ok, start_module}} <- {:start, Map.get(options, :start, Keyword.fetch(avm_config, :start))},
+         {:start, {:ok, start_module}} <-
+           {:start, Map.get(options, :start, Keyword.fetch(avm_config, :start))},
          :ok <- pack_avm_deps(),
          :ok <- pack_priv(),
          start_beam_file = "#{Atom.to_string(start_module)}.beam",
@@ -163,7 +164,7 @@ defmodule Mix.Tasks.Atomvm.Packbeam do
     parse_args(t, Map.put(accum, :start, start))
   end
 
-  defp parse_args([_|t], accum) do
+  defp parse_args([_ | t], accum) do
     parse_args(t, accum)
   end
 end
