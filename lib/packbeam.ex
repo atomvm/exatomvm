@@ -1,26 +1,26 @@
 defmodule ExAtomVM.PackBEAM do
   @allowed_chunks MapSet.new([
-                    ~c"AtU8",
-                    ~c"Code",
-                    ~c"ExpT",
-                    ~c"LocT",
-                    ~c"ImpT",
-                    ~c"LitU",
-                    ~c"FunT",
-                    ~c"StrT",
-                    ~c"LitT"
+                    'AtU8',
+                    'Code',
+                    'ExpT',
+                    'LocT',
+                    'ImpT',
+                    'LitU',
+                    'FunT',
+                    'StrT',
+                    'LitT'
                   ])
 
   @avm_header <<0x23, 0x21, 0x2F, 0x75, 0x73, 0x72, 0x2F, 0x62, 0x69, 0x6E, 0x2F, 0x65, 0x6E,
                 0x76, 0x20, 0x41, 0x74, 0x6F, 0x6D, 0x56, 0x4D, 0x0A, 0x00, 0x00>>
 
   defp uncompress_literals(chunks) do
-    with {~c"LitT", litt} <- List.keyfind(chunks, ~c"LitT", 0),
+    with {'LitT', litt} <- List.keyfind(chunks, 'LitT', 0),
          <<_header::binary-size(4), data::binary>> <- litt do
       litu = :zlib.uncompress(data)
 
       chunks
-      |> List.keyreplace(~c"LitT", 0, {~c"LitU", litu})
+      |> List.keyreplace('LitT', 0, {'LitU', litu})
     else
       nil -> chunks
       _ -> :error

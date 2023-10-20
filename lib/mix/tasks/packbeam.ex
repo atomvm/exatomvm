@@ -9,8 +9,7 @@ defmodule Mix.Tasks.Atomvm.Packbeam do
          {:args, {:ok, options}} <- {:args, parse_args(args)},
          config = Project.config(),
          {:atomvm, {:ok, avm_config}} <- {:atomvm, Keyword.fetch(config, :atomvm)},
-         {:start, {:ok, start_module}} <-
-           {:start, Map.get(options, :start, Keyword.fetch(avm_config, :start))},
+         {:start, {:ok, start_module}} <- {:start, Map.get(options, :start, Keyword.fetch(avm_config, :start))},
          :ok <- pack_avm_deps(),
          :ok <- pack_priv(),
          start_beam_file = "#{Atom.to_string(start_module)}.beam",
@@ -40,30 +39,31 @@ defmodule Mix.Tasks.Atomvm.Packbeam do
   end
 
   defp pack_avm_deps() do
-    dep_beams = list_dep_beams()
-
     case avm_deps_path() do
-      {:ok, avm_path} ->
-        dep_avms = list_dep_avms(avm_path)
-        PackBEAM.make_avm(dep_beams ++ dep_avms, "deps.avm")
+      {:ok, avms_path} ->
+        pack_deps(avms_path)
 
       {:error, :no_avm_deps_path} ->
-        PackBEAM.make_avm(dep_beams, "deps.avm")
+        # Let's completely skip this instead of building an empty avm file
+        PackBEAM.make_avm([], "deps.avm")
+        :ok
 
       any ->
         any
     end
   end
 
-  defp list_dep_avms(avm_path) do
-    avm_path
-    |> File.ls!()
-    |> Enum.map(fn file -> {Path.join(avm_path, file), :avm} end)
-  end
+  defp pack_deps(avms_path) do
+    deps_avms =
+      avms_path
+      |> File.ls!()
+      |> Enum.map(fn file -> {Path.join(avms_path, file), :avm} end)
 
-  defp list_dep_beams() do
-    runtime_deps_beams()
-    |> Enum.map(fn beam_file -> {beam_file, :beam} end)
+    deps_beams =
+      runtime_deps_beams()
+      |> Enum.map(fn beam_file -> {beam_file, :beam} end)
+
+    PackBEAM.make_avm(deps_beams ++ deps_avms, "deps.avm")
   end
 
   def beam_files(path) do
@@ -164,7 +164,7 @@ defmodule Mix.Tasks.Atomvm.Packbeam do
     parse_args(t, Map.put(accum, :start, start))
   end
 
-  defp parse_args([_ | t], accum) do
+  defp parse_args([_|t], accum) do
     parse_args(t, accum)
   end
 end
