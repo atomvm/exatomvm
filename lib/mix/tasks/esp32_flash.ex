@@ -23,15 +23,15 @@ defmodule Mix.Tasks.Atomvm.Esp32.Flash do
     else
       {:atomvm, :error} ->
         IO.puts("error: missing AtomVM project config.")
-        :error
+        exit({:shutdown, 1})
 
       {:args, :error} ->
         IO.puts("Syntax: ")
-        :error
+        exit({:shutdown, 1})
 
       {:pack, _} ->
         IO.puts("error: failed PackBEAM, target will not be flashed.")
-        :error
+        exit({:shutdown, 1})
     end
   end
 

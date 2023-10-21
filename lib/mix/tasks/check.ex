@@ -12,6 +12,8 @@ defmodule Mix.Tasks.Atomvm.Check do
     with :ok <- instructions_check,
          :ok <- ext_calls_check do
       {:ok, []}
+    else
+      _any -> exit({:shutdown, 1})
     end
   end
 
