@@ -317,7 +317,7 @@ Example:
 
 The `atomvm.esp32.flash` task is used to flash your application to a micro-controller and executed by the AtomVM virtual machine.
 
-> Note.  Before running this task, you must flash the AtomVM virtual machine to the device.  See the [AtomVM documentation](https://doc.atomvm.net) for information about how to flash the AtomVM image to a device.
+> Note.  Before running this task, you must flash the AtomVM virtual machine to the device.  See the [Getting Started](https://www.atomvm.net/doc/master/getting-started-guide.html) section if the [AtomVM documentation](https://www.atomvm.net/doc/master/) for information about how to flash the AtomVM image to a device.
 
 The `atomvm` properties list in the Mix project file (`mix.exs`) may contain the following entries related to this task:
 
@@ -363,3 +363,53 @@ Example:
 
     Leaving...
     Hard resetting via RTS pin...
+
+### The `atomvm.stm32.flash` task
+
+The `atomvm.stm32.flash` task is used to flash your application to a micro-controller and executed by the AtomVM virtual machine.
+
+> Note.  Before running this task, you must flash the AtomVM virtual machine to the device.  See the [Getting Started](https://www.atomvm.net/doc/master/getting-started-guide.html) section if the [AtomVM documentation](https://www.atomvm.net/doc/master/) for information about how to flash the AtomVM image to a device.
+
+The `atomvm` properties list in the Mix project file (`mix.exs`) may contain the following entries related to this task:
+
+| Key | Type | Default | Value |
+|-----|------|----------|-------|
+| `stflash_path` | string | undefined | The full path to the `st-flash` utility, if not in users PATH |
+| `flash_offset` | Address in hexademical format | 0x8080000 | The beginning flash address to write to  |
+
+Properties in the `mix.exs` file may be over-ridden on the command line using long-style flags (prefixed by `--`) by the same name as the properties key.  For example, you can use the `--stflash_path` option to specify or override the `stflash_path` property in the above table.
+
+Example:
+
+    shell$ mix atomvm.stm32.flash
+    warning: GPIO.digital_write/2 is undefined (module GPIO is not available or is yet to be defined)
+      lib/Blinky.ex:34
+
+    warning: GPIO.set_pin_mode/2 is undefined (module GPIO is not available or is yet to be defined)
+      lib/Blinky.ex:58
+
+    warning: GPIO.set_pin_mode/2 is undefined (module GPIO is not available or is yet to be defined)
+      lib/Blinky.ex:59
+    
+    warning: GPIO.set_pin_mode/2 is undefined (module GPIO is not available or is yet to be defined)
+      lib/Blinky.ex:65
+
+    warning: :atomvm.platform/0 is undefined (module :atomvm is not available or is yet to be defined)
+      lib/Blinky.ex:48
+
+    warning: :atomvm.platform/0 is undefined (module :atomvm is not available or is yet to be defined)
+      lib/Blinky.ex:57
+
+    st-flash 1.7.0
+    2023-10-31T10:47:20 INFO common.c: F42x/F43x: 256 KiB SRAM, 2048 KiB flash in at least 16 KiB pages.
+    file Blinky.avm md5 checksum: 3dca925a9616d4d65dc9d87fbf19af, stlink checksum: 0x00767ad5
+    2023-10-31T10:47:20 INFO common.c: Attempting to write 156172 (0x2620c) bytes to stm32 address: 134742016 (0x8080000)
+    EraseFlash - Sector:0x8 Size:0x20000 2023-10-31T10:47:22 INFO common.c: Flash page at addr: 0x08080000 erased
+    EraseFlash - Sector:0x9 Size:0x20000 2023-10-31T10:47:24 INFO common.c: Flash page at addr: 0x080a0000 erased
+    2023-10-31T10:47:24 INFO common.c: Finished erasing 2 pages of 131072 (0x20000) bytes
+    2023-10-31T10:47:24 INFO common.c: Starting Flash write for F2/F4/F7/L4
+    2023-10-31T10:47:24 INFO flash_loader.c: Successfully loaded flash loader in sram
+    2023-10-31T10:47:24 INFO flash_loader.c: Clear DFSR
+    2023-10-31T10:47:24 INFO common.c: enabling 32-bit flash writes
+    2023-10-31T10:47:26 INFO common.c: Starting verification of write complete
+    2023-10-31T10:47:27 INFO common.c: Flash written and verified! jolly good!
