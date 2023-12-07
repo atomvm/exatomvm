@@ -3,6 +3,8 @@ erlang:length/1
 erlang:byte_size/1
 erlang:bit_size/1
 erlang:get/1
+erlang:integer_to_binary/2
+erlang:integer_to_list/2
 erlang:is_atom/1
 erlang:is_binary/1
 erlang:is_integer/1
@@ -78,6 +80,7 @@ erlang:integer_to_list/1
 erlang:link/1
 erlang:list_to_binary/1
 erlang:list_to_integer/1
+erlang:list_to_integer/2
 erlang:list_to_float/1
 erlang:list_to_tuple/1
 erlang:iolist_size/1
@@ -104,6 +107,7 @@ erlang:system_time/1
 erlang:tuple_to_list/1
 erlang:universaltime/0
 erlang:timestamp/0
+erlang:process_info/1
 erlang:process_flag/2
 erlang:process_flag/3
 erlang:processes/0
@@ -501,6 +505,7 @@ Elixir.Access:get/3
 Elixir.Access:module_info/0
 Elixir.Access:module_info/1
 Elixir.Code:__info__/1
+Elixir.ArgumentError:exception/1
 Elixir.Code:ensure_compiled?/1
 Elixir.Code:module_info/0
 Elixir.Code:module_info/1
@@ -553,6 +558,7 @@ Elixir.Kernel:inspect/1
 Elixir.Kernel:inspect/2
 Elixir.Kernel:module_info/0
 Elixir.Kernel:module_info/1
+Elixir.KeyError:exception/1
 Elixir.Keyword:__info__/1
 Elixir.Keyword:delete/2
 Elixir.Keyword:fetch!/2
