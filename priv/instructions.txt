@@ -145,3 +145,4 @@ call_fun2
 badrecord
 update_record
 bs_match
+test
