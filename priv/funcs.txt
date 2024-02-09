@@ -152,6 +152,9 @@ erlang:iolist_size/1
 erlang:iolist_to_binary/1
 erlang:is_atom/1
 erlang:is_binary/1
+erlang:is_boolean/1
+erlang:is_float/1
+erlang:is_function/1
 erlang:is_integer/1
 erlang:is_list/1
 erlang:is_map/1
