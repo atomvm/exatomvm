@@ -87,6 +87,7 @@ is_boolean
 is_function2
 bs_start_match2
 bs_get_integer2
+bs_get_float2
 bs_get_binary2
 bs_skip_bits2
 bs_test_tail2
