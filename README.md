@@ -138,7 +138,7 @@ The `my_project.avm` file should be created in the top level directory of your p
     shell$ ls -l my_project.avm
     -rw-rw-r--  1 frege  wheel  144148 May  8 16:34 my_project.avm
 
-You can optionally use the [AtomVM Packbeam](https://git.com/atomvm/atomvm_packbeam) tool to view the contents of this AVM file.
+You can optionally use the [AtomVM Packbeam](https://github.com/atomvm/atomvm_packbeam) tool to view the contents of this AVM file.
 
     shell$ packbeam list my_project.avm
     Elixir.MyProject.beam * [500]
