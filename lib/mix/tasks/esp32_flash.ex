@@ -12,7 +12,7 @@ defmodule Mix.Tasks.Atomvm.Esp32.Flash do
          {:args, {:ok, options}} <- {:args, parse_args(args)},
          {:pack, {:ok, _}} <- {:pack, Packbeam.run(args)},
          idf_path <- System.get_env("IDF_PATH", <<"">>) do
-      chip = Map.get(options, :chip, Keyword.get(avm_config, :chip, "esp32"))
+      chip = Map.get(options, :chip, Keyword.get(avm_config, :chip, "auto"))
       port = Map.get(options, :port, Keyword.get(avm_config, :port, "/dev/ttyUSB0"))
       baud = Map.get(options, :baud, Keyword.get(avm_config, :baud, "115200"))
 
@@ -50,9 +50,9 @@ defmodule Mix.Tasks.Atomvm.Esp32.Flash do
       "write_flash",
       "-u",
       "--flash_mode",
-      "dio",
+      "keep",
       "--flash_freq",
-      "40m",
+      "keep",
       "--flash_size",
       "detect",
       "0x#{Integer.to_string(flash_offset, 16)}",
