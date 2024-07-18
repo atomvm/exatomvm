@@ -87,6 +87,8 @@ calendar:day_of_the_week/3
 calendar:module_info/0
 calendar:module_info/1
 calendar:system_time_to_universal_time/2
+code:all_available/0
+code:all_loaded/0
 code:load_abs/1
 code:load_binary/3
 code:module_info/0
