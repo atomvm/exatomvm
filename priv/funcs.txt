@@ -702,6 +702,7 @@ maps:get/2
 maps:get/3
 maps:is_key/2
 maps:iterator/1
+maps:iterator/2
 maps:keys/1
 maps:map/2
 maps:merge/2
