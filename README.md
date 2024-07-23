@@ -1,19 +1,19 @@
 # ExAtomVM
 
-ExAtomVM provide a collection of [Mix](https://hexdocs.pm/mix/1.13/Mix.html) tasks that  greatly simplify development and deployment of Elixir applications targeted for the AtomVM platform.
+ExAtomVM provide a collection of [Mix](https://hexdocs.pm/mix/Mix.html) tasks that  greatly simplify development and deployment of Elixir applications targeted for the AtomVM platform.
 
 The following operations are supported:
 
 * Packing compiled BEAM files into AVM files for use in AtomVM;
-* Flashing AVM files to micro-controllers (Currently, only ESP32 devices are supported).
+* Flashing AVM files to micro-controllers (Currently, only ESP32 and STM32 devices are supported by this plugin).
 
-> Note.  For information about how to use Mix plugins, see the [Mix](https://hexdocs.pm/mix/1.13/Mix.html) documentation.
+> Note.  For information about how to use Mix plugins, see the [Mix](https://hexdocs.pm/mix/Mix.html) documentation.
 
 ## Dependencies
 
 To use this plugin to build packbeam files, you will need
 
-* [Erlang/OTP](https://erlang.org) 21, 22, or 23
+* [Erlang/OTP](https://erlang.org) 21-27
 * [Elixir](https://elixir-lang.org) 1.13 (or higher)
 
 To flash an ExAtomVM project to an ESP32, you will need:
@@ -48,7 +48,7 @@ Start by creating a Mix project
 
     Run "mix help" for more commands.
 
-Edit the generated `mix.exs` to include the ExAtomVM dependency (`{:exatomvm, git: "https://github.com/atomvm/ExAtomVM/"}`), and add a properties list using the `atomvm` key containing a `start` and `flash_offset` entry:
+Edit the generated `mix.exs` to include the ExAtomVM dependency (`{:exatomvm, git: "https://github.com/atomvm/ExAtomVM"}`), and add a properties list using the `atomvm` key containing a `start` and `flash_offset` entry:
 
     ## elixir
     defmodule MyProject.MixProject do
@@ -78,7 +78,7 @@ Edit the generated `mix.exs` to include the ExAtomVM dependency (`{:exatomvm, gi
         # Run "mix help deps" to learn about dependencies.
         defp deps do
         [
-            {:exatomvm, git: "https://github.com/atomvm/ExAtomVM/"}
+            {:exatomvm, git: "https://github.com/atomvm/ExAtomVM"}
             # {:dep_from_hexpm, "~> 0.3.0"},
             # {:dep_from_git, git: "https://github.com/elixir-lang/my_dep.git", tag: "0.1.0"}
         ]
@@ -105,23 +105,6 @@ Run `mix deps.get` to download ExAtomVM into your `deps` directory:
     remote: Compressing objects: 100% (17/17), done.
     remote: Total 150 (delta 14), reused 19 (delta 10), pack-reused 121
     origin/HEAD set to master
-
-Create a directory called `avm_deps` in the top level of your project directory:
-
-    shell$ mkdir avm_deps
-
-Download a copy of the AtomVM-libs from the AtomVM Gitbub [release repository](https://github.com/atomvm/AtomVM/releases/).  Extract the contents of this archive and copy the enclosed AVM files into your `avm_deps` directory.
-
-Afterwards, you should see something like:
-
-    shell$ ls -l avm_deps
-    total 264
-    -rw-rw-r--  1 frege  wheel  11380 May  8 16:32 alisp.avm
-    -rw-rw-r--  1 frege  wheel  48956 May  8 16:32 atomvmlib.avm
-    -rw-rw-r--  1 frege  wheel  23540 May  8 16:32 eavmlib.avm
-    -rw-rw-r--  1 frege  wheel  25456 May  8 16:32 estdlib.avm
-    -rw-rw-r--  1 frege  wheel   1052 May  8 16:32 etest.avm
-    -rw-rw-r--  1 frege  wheel  16356 May  8 16:32 exavmlib.avm
 
 Run the `atomvm.packbeam` Mix task to create a packbeam file:
 
@@ -382,24 +365,6 @@ Properties in the `mix.exs` file may be over-ridden on the command line using lo
 Example:
 
     shell$ mix atomvm.stm32.flash
-    warning: GPIO.digital_write/2 is undefined (module GPIO is not available or is yet to be defined)
-      lib/Blinky.ex:34
-
-    warning: GPIO.set_pin_mode/2 is undefined (module GPIO is not available or is yet to be defined)
-      lib/Blinky.ex:58
-
-    warning: GPIO.set_pin_mode/2 is undefined (module GPIO is not available or is yet to be defined)
-      lib/Blinky.ex:59
-    
-    warning: GPIO.set_pin_mode/2 is undefined (module GPIO is not available or is yet to be defined)
-      lib/Blinky.ex:65
-
-    warning: :atomvm.platform/0 is undefined (module :atomvm is not available or is yet to be defined)
-      lib/Blinky.ex:48
-
-    warning: :atomvm.platform/0 is undefined (module :atomvm is not available or is yet to be defined)
-      lib/Blinky.ex:57
-
     st-flash 1.7.0
     2023-10-31T10:47:20 INFO common.c: F42x/F43x: 256 KiB SRAM, 2048 KiB flash in at least 16 KiB pages.
     file Blinky.avm md5 checksum: 3dca925a9616d4d65dc9d87fbf19af, stlink checksum: 0x00767ad5
