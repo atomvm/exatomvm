@@ -163,7 +163,7 @@ defmodule Mix.Tasks.Atomvm.Packbeam do
       if Keyword.get(dep.opts, :runtime, true) do
         ["#{dep.opts[:build]}/ebin" | runtime_deps(dep.deps) ++ acc]
       else
-        []
+        acc
       end
     end)
   end
