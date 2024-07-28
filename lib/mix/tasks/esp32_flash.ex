@@ -39,8 +39,6 @@ defmodule Mix.Tasks.Atomvm.Esp32.Flash do
     tool_args = [
       "--chip",
       chip,
-      "--port",
-      port,
       "--baud",
       baud,
       "--before",
@@ -58,6 +56,8 @@ defmodule Mix.Tasks.Atomvm.Esp32.Flash do
       "0x#{Integer.to_string(flash_offset, 16)}",
       "#{Project.config()[:app]}.avm"
     ]
+
+    tool_args = if port == "auto", do: tool_args, else: ["--port", port] ++ tool_args
 
     tool_full_path = get_esptool_path(idf_path)
     System.cmd(tool_full_path, tool_args, stderr_to_stdout: true, into: IO.stream(:stdio, 1))
