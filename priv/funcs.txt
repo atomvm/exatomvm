@@ -329,6 +329,7 @@ erlang:self/0
 erlang:send/2
 erlang:send_after/3
 erlang:setelement/3
+erlang:size/1
 erlang:spawn/1
 erlang:spawn/3
 erlang:spawn_link/1
