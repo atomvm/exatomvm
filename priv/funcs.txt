@@ -628,6 +628,7 @@ lists:keydelete/3
 lists:keyfind/3
 lists:keymember/3
 lists:keyreplace/4
+lists:keytake/3
 lists:map/2
 lists:member/2
 lists:module_info/0
