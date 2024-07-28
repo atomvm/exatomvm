@@ -221,6 +221,7 @@ erlang:>/2
 erlang:>=/2
 erlang:abs/1
 erlang:and/2
+erlang:apply/2
 erlang:apply/3
 erlang:atom_to_binary/2
 erlang:atom_to_list/1
