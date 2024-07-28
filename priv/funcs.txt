@@ -1037,10 +1037,17 @@ Elixir.Keyword:fetch/2
 Elixir.Keyword:get/2
 Elixir.Keyword:get/3
 Elixir.Keyword:get_lazy/3
+Elixir.Keyword:has_key?/2
 Elixir.Keyword:__info__/1
+Elixir.Keyword:keyword?/1
+Elixir.Keyword:merge/2
 Elixir.Keyword:module_info/0
 Elixir.Keyword:module_info/1
+Elixir.Keyword:pop/2
+Elixir.Keyword:pop/3
+Elixir.Keyword:pop!/2
 Elixir.Keyword:put/3
+Elixir.Keyword:take/2
 Elixir.LEDC:channel_config/1
 Elixir.LEDC:fade_func_install/1
 Elixir.LEDC:fade_func_uninstall/0
