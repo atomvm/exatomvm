@@ -228,7 +228,9 @@ erlang:apply/3
 erlang:atom_to_binary/2
 erlang:atom_to_list/1
 erlang:band/2
+erlang:binary_to_atom/1
 erlang:binary_to_atom/2
+erlang:binary_to_existing_atom/1
 erlang:binary_to_existing_atom/2
 erlang:binary_to_float/1
 erlang:binary_to_integer/1
@@ -253,6 +255,7 @@ erlang:element/2
 erlang:erase/1
 erlang:error/1
 erlang:error/2
+erlang:error/3
 erlang:exit/1
 erlang:exit/2
 erlang:float_to_binary/1
