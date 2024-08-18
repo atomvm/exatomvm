@@ -126,6 +126,7 @@ has_map_fields
 get_map_elements
 is_tagged_tuple
 build_stacktrace
+raw_raise
 get_hd
 get_tl
 put_tuple2
