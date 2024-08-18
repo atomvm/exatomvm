@@ -1,3 +1,11 @@
+ahttp_client:close/1
+ahttp_client:connect/4
+ahttp_client:module_info/0
+ahttp_client:module_info/1
+ahttp_client:recv/2
+ahttp_client:request/5
+ahttp_client:stream/2
+ahttp_client:stream_request_body/3
 alisp:booleanize/1
 alisp:eval/1
 alisp:module_info/0
@@ -225,6 +233,7 @@ erlang:abs/1
 erlang:and/2
 erlang:apply/2
 erlang:apply/3
+erlang:atom_to_binary/1
 erlang:atom_to_binary/2
 erlang:atom_to_list/1
 erlang:band/2
@@ -375,6 +384,7 @@ esp32init:module_info/1
 esp32init:start/0
 esp:deep_sleep/0
 esp:deep_sleep/1
+esp:deep_sleep_enable_gpio_wakeup/2
 esp:freq_hz/0
 esp:get_default_mac/0
 esp:get_mac/1
@@ -397,8 +407,10 @@ esp:reset_reason/0
 esp:restart/0
 esp:rtc_slow_get_binary/0
 esp:rtc_slow_set_binary/1
+esp:sleep_disable_ext1_wakeup_io/1
 esp:sleep_enable_ext0_wakeup/2
 esp:sleep_enable_ext1_wakeup/2
+esp:sleep_enable_ext1_wakeup_io/2
 esp:sleep_enable_ulp_wakeup/0
 esp:sleep_get_wakeup_cause/0
 esp:task_wdt_add_user/1
@@ -636,6 +648,7 @@ lists:keydelete/3
 lists:keyfind/3
 lists:keymember/3
 lists:keyreplace/4
+lists:keystore/4
 lists:keytake/3
 lists:map/2
 lists:member/2
@@ -772,6 +785,7 @@ network:handle_info/2
 network:init/1
 network:module_info/0
 network:module_info/1
+network:sta_rssi/0
 network:start/1
 network:start_link/1
 network:stop/0
@@ -791,10 +805,22 @@ port:call/2
 port:call/3
 port:module_info/0
 port:module_info/1
+proplists:compact/1
+proplists:delete/2
+proplists:from_map/1
+proplists:get_all_values/2
+proplists:get_bool/2
 proplists:get_value/2
 proplists:get_value/3
+proplists:is_defined/2
+proplists:lookup/2
+proplists:lookup_all/2
 proplists:module_info/0
 proplists:module_info/1
+proplists:property/1
+proplists:property/2
+proplists:to_map/1
+proplists:unfold/1
 queue:all/2
 queue:any/2
 queue:delete/2
@@ -816,6 +842,8 @@ queue:is_queue/1
 queue:join/2
 queue:len/1
 queue:member/2
+queue:module_info/0
+queue:module_info/1
 queue:new/0
 queue:out/1
 queue:out_r/1
@@ -840,6 +868,8 @@ sets:is_equal/2
 sets:is_set/1
 sets:is_subset/2
 sets:map/2
+sets:module_info/0
+sets:module_info/1
 sets:new/0
 sets:new/1
 sets:size/1
