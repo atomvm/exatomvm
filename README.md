@@ -413,3 +413,31 @@ Example:
     2023-10-31T10:47:24 INFO common.c: enabling 32-bit flash writes
     2023-10-31T10:47:26 INFO common.c: Starting verification of write complete
     2023-10-31T10:47:27 INFO common.c: Flash written and verified! jolly good!
+
+### The `atomvm.pico.flash` task
+
+The `atomvm.pico.flash` task is used to flash your application to a micro-controller and executed by the AtomVM virtual machine.
+
+> Note.  Before running this task, you must flash the AtomVM virtual machine to the device.  See the [Getting Started](https://www.atomvm.net/doc/master/getting-started-guide.html) section if the [AtomVM documentation](https://www.atomvm.net/doc/master/) for information about how to flash the AtomVM image to a device.
+
+The `atomvm` properties list in the Mix project file (`mix.exs`) may contain the following entries related to this task:
+
+| Key | Type | Default | Value |
+|-----|------|----------|-------|
+| `pico_path` | string | "/run/media/${USER}/RPI-RP2" on linux; "/Volumes/RPI-RP2" on darwin (Mac) | The full path to the pico mount point |
+| `pico_reset` | string |"/dev/ttyACM*"  on linux; "/dev/cu.usbmodem14*" on darwin | The full path to the pico device to reset if required |
+| `picotool` | string | undefined | The full path to picotool executable (currently optional) |
+
+Properties in the `mix.exs` file may be over-ridden on the command line using long-style flags (prefixed by `--`) by the same name as the properties key.  For example, you can use the `--pico_path` option to specify or override the `pico_path` property in the above table.
+
+### The `atomvm.uf2create` task
+
+The `atomvm.uf2create` is use to create uf2 files appropriate for pico devices from a packed .avm application file, if the packed file does not exist the `atomvm.packbeam` task will be used to create the file (after compilation in necessary). Normally using this task manually is not required, it is called automatically by the `atomvm.pico.flash` if a uf2 file has not already been created.
+
+The `atomvm` properties list in the Mix project file (`mix.exs`) may contain the following entries related to this task:
+
+| Key | Type | Default | Value |
+|-----|------|----------|-------|
+| `app_start` | Address in hexademical format | 0x10180000 | The flash address to place the application |
+
+Properties in the `mix.exs` file may be over-ridden on the command line using long-style flags (prefixed by `--`) by the same name as the properties key.  For example, you can use the `--app_start` option to specify or override the `app_start` property in the above table.
