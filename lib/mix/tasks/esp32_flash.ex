@@ -17,7 +17,7 @@ defmodule Mix.Tasks.Atomvm.Esp32.Flash do
       baud = Map.get(options, :baud, Keyword.get(avm_config, :baud, "115200"))
 
       flash_offset =
-        Map.get(options, :flash_offset, Keyword.get(avm_config, :flash_offset, 0x210000))
+        Map.get(options, :flash_offset, Keyword.get(avm_config, :flash_offset, 0x250000))
 
       flash(idf_path, chip, port, baud, flash_offset)
     else
@@ -91,8 +91,9 @@ defmodule Mix.Tasks.Atomvm.Esp32.Flash do
     parse_args(t, Map.put(accum, :chip, chip))
   end
 
-  defp parse_args([<<"--flash_offset">>, flash_offset | t], accum) do
-    parse_args(t, Map.put(accum, :flash_offset, flash_offset))
+  defp parse_args([<<"--flash_offset">>, "0x" <> hex = flash_offset | t], accum) do
+    {offset, _} = Integer.parse(hex, 16)
+    parse_args(t, Map.put(accum, :flash_offset, offset))
   end
 
   defp parse_args([_ | t], accum) do
