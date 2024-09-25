@@ -1464,6 +1464,8 @@ Elixir.RuntimeError:module_info/0
 Elixir.RuntimeError:module_info/1
 Elixir.RuntimeError:__struct__/0
 Elixir.RuntimeError:__struct__/1
+Elixir.System:monotonic_time/1
+Elixir.System:system_time/1
 Elixir.SystemLimitError:exception/1
 Elixir.SystemLimitError:__info__/1
 Elixir.SystemLimitError:message/1
