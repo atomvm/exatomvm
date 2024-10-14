@@ -404,6 +404,7 @@ esp:get_default_mac/0
 esp:get_mac/1
 esp:module_info/0
 esp:module_info/1
+esp:mount/4
 esp:nvs_erase_all/0
 esp:nvs_erase_all/1
 esp:nvs_erase_key/1
@@ -433,6 +434,7 @@ esp:task_wdt_delete_user/1
 esp:task_wdt_init/1
 esp:task_wdt_reconfigure/1
 esp:task_wdt_reset_user/1
+esp:umount/1
 etest:assert_equals/2
 etest:assert_exception/1
 etest:assert_exception/2
