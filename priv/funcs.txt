@@ -1291,6 +1291,11 @@ Elixir.Exception:module_info/0
 Elixir.Exception:module_info/1
 Elixir.Exception:normalize/2
 Elixir.Exception:normalize/3
+Elixir.Esp.ADC:acquire/4
+Elixir.Esp.ADC:deinit/1
+Elixir.Esp.ADC:init/0
+Elixir.Esp.ADC:release_channel/1
+Elixir.Esp.ADC:sample/3
 Elixir.FunctionClauseError:exception/1
 Elixir.FunctionClauseError:__info__/1
 Elixir.FunctionClauseError:message/1
