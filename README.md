@@ -1,19 +1,17 @@
 # ExAtomVM
 
-ExAtomVM provide a collection of [Mix](https://hexdocs.pm/mix/1.13/Mix.html) tasks that  greatly simplify development and deployment of Elixir applications targeted for the AtomVM platform.
+ExAtomVM provide a collection of [Mix](https://hexdocs.pm/mix/Mix.html) tasks that  greatly simplify development and deployment of Elixir applications targeted for the AtomVM platform.
 
 The following operations are supported:
 
 * Packing compiled BEAM files into AVM files for use in AtomVM;
-* Flashing AVM files to micro-controllers (Currently, only ESP32 devices are supported).
-
-> Note.  For information about how to use Mix plugins, see the [Mix](https://hexdocs.pm/mix/1.13/Mix.html) documentation.
+* Flashing AVM files to micro-controllers (Currently ESP32, STM32 and PICO/PICO2 devices are supported by this plugin).
 
 ## Dependencies
 
 To use this plugin to build packbeam files, you will need
 
-* [Erlang/OTP](https://erlang.org) 21, 22, or 23
+* [Erlang/OTP](https://erlang.org) 21-27
 * [Elixir](https://elixir-lang.org) 1.13 (or higher)
 
 To flash an ExAtomVM project to an ESP32, you will need:
@@ -48,7 +46,7 @@ Start by creating a Mix project
 
     Run "mix help" for more commands.
 
-Edit the generated `mix.exs` to include the ExAtomVM dependency (`{:exatomvm, git: "https://github.com/atomvm/ExAtomVM/"}`), and add a properties list using the `atomvm` key containing a `start` and `flash_offset` entry:
+Edit the generated `mix.exs` to include the ExAtomVM dependency (`{:exatomvm, git: "https://github.com/atomvm/ExAtomVM"}`), and add a properties list using the `atomvm` key containing a `start` and a `flash_offset` (used by ESP32) entry:
 
     ## elixir
     defmodule MyProject.MixProject do
@@ -63,7 +61,7 @@ Edit the generated `mix.exs` to include the ExAtomVM dependency (`{:exatomvm, gi
             deps: deps(),
             atomvm: [
               start: MyProject,
-              flash_offset: 0x210000
+              flash_offset: 0x250000
             ]
         ]
         end
@@ -78,7 +76,7 @@ Edit the generated `mix.exs` to include the ExAtomVM dependency (`{:exatomvm, gi
         # Run "mix help deps" to learn about dependencies.
         defp deps do
         [
-            {:exatomvm, git: "https://github.com/atomvm/ExAtomVM/"}
+            {:exatomvm, git: "https://github.com/atomvm/ExAtomVM"}
             # {:dep_from_hexpm, "~> 0.3.0"},
             # {:dep_from_git, git: "https://github.com/elixir-lang/my_dep.git", tag: "0.1.0"}
         ]
@@ -116,12 +114,7 @@ Afterwards, you should see something like:
 
     shell$ ls -l avm_deps
     total 264
-    -rw-rw-r--  1 frege  wheel  11380 May  8 16:32 alisp.avm
-    -rw-rw-r--  1 frege  wheel  48956 May  8 16:32 atomvmlib.avm
-    -rw-rw-r--  1 frege  wheel  23540 May  8 16:32 eavmlib.avm
-    -rw-rw-r--  1 frege  wheel  25456 May  8 16:32 estdlib.avm
-    -rw-rw-r--  1 frege  wheel   1052 May  8 16:32 etest.avm
-    -rw-rw-r--  1 frege  wheel  16356 May  8 16:32 exavmlib.avm
+    -rw-rw-r--  1 frege  wheel  193560 May  8 16:32 atomvmlib.avm
 
 Run the `atomvm.packbeam` Mix task to create a packbeam file:
 
@@ -258,7 +251,7 @@ To flash your project to an ESP32 device, use the `atomvm.esp32.flash` mix task.
         ###########################################################
 
     I (130) AtomVM: Starting AtomVM revision 0.5.0
-    I (130) AtomVM: Loaded BEAM partition main.avm at address 0x210000 (size=1048576 bytes)
+    I (130) AtomVM: Loaded BEAM partition main.avm at address 0x250000 (size=1048576 bytes)
     I (160) atomvm_adc: eFuse Two Point: NOT supported
     I (160) atomvm_adc: eFuse Vref: Supported
     I (160) AtomVM: Found startup beam Elixir.MyProject.beam
@@ -278,13 +271,13 @@ To use this Mix plugin, add `ExAtomVM` to the dependencies list in your `mix.exs
         ...
         deps: [
           ...
-          {:exatomvm, git: "https://github.com/atomvm/ExAtomVM/"},
+          {:exatomvm, git: "https://github.com/atomvm/ExAtomVM"},
           ...
         ],
         ...
         atomvm: [
             start: HelloWorld,
-            flash_offset: 0x210000
+            flash_offset: 0x250000
         ]
       ]
     end
@@ -323,7 +316,7 @@ The `atomvm` properties list in the Mix project file (`mix.exs`) may contain the
 
 | Key | Type | Default | Value |
 |-----|------|----------|-------|
-| `flash_offset` | Address in hexademical format | 0x210000 | The name of the module containing the `start/0` entrypoint function |
+| `flash_offset` | Address in hexademical format | 0x250000 | The name of the module containing the `start/0` entrypoint function |
 | `chip` | `esp32` | `esp32` | Chip type |
 | `port` | device path | `/dev/ttyUSB0` | Port to which device is connected on host computer |
 | `baud` | integer | 115200 | BAUD rate used when flashing to device |
@@ -382,24 +375,6 @@ Properties in the `mix.exs` file may be over-ridden on the command line using lo
 Example:
 
     shell$ mix atomvm.stm32.flash
-    warning: GPIO.digital_write/2 is undefined (module GPIO is not available or is yet to be defined)
-      lib/Blinky.ex:34
-
-    warning: GPIO.set_pin_mode/2 is undefined (module GPIO is not available or is yet to be defined)
-      lib/Blinky.ex:58
-
-    warning: GPIO.set_pin_mode/2 is undefined (module GPIO is not available or is yet to be defined)
-      lib/Blinky.ex:59
-    
-    warning: GPIO.set_pin_mode/2 is undefined (module GPIO is not available or is yet to be defined)
-      lib/Blinky.ex:65
-
-    warning: :atomvm.platform/0 is undefined (module :atomvm is not available or is yet to be defined)
-      lib/Blinky.ex:48
-
-    warning: :atomvm.platform/0 is undefined (module :atomvm is not available or is yet to be defined)
-      lib/Blinky.ex:57
-
     st-flash 1.7.0
     2023-10-31T10:47:20 INFO common.c: F42x/F43x: 256 KiB SRAM, 2048 KiB flash in at least 16 KiB pages.
     file Blinky.avm md5 checksum: 3dca925a9616d4d65dc9d87fbf19af, stlink checksum: 0x00767ad5
