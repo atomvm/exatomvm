@@ -346,6 +346,7 @@ erlang:process_flag/2
 erlang:process_flag/3
 erlang:process_info/2
 erlang:put/2
+erlang:raise/2
 erlang:raise/3
 erlang:ref_to_list/1
 erlang:register/2
