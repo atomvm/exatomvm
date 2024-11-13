@@ -29,6 +29,7 @@
 # Check the readme for each dependency for more information on install and usage.
 #
 dependencies:
+  [] #remove this line and uncomment you dep below
   # atomgl:
   #   git: https://github.com/atomvm/atomgl
   #   version: "main"
