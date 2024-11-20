@@ -17,7 +17,7 @@ defmodule Mix.Tasks.Atomvm.Esp32.Flash do
       baud = Map.get(options, :baud, Keyword.get(avm_config, :baud, "115200"))
 
       flash_offset =
-        Map.get(options, :flash_offset, Keyword.get(avm_config, :flash_offset, 0x250000))
+        Map.get(options, :flash_offset, Keyword.get(avm_config, :esp32_flash_offset, 0x250000))
 
       flash(idf_path, chip, port, baud, flash_offset)
     else

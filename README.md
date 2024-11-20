@@ -48,7 +48,7 @@ Start by creating a Mix project
 
     Run "mix help" for more commands.
 
-Edit the generated `mix.exs` to include the ExAtomVM dependency (`{:exatomvm, git: "https://github.com/atomvm/ExAtomVM/"}`), and add a properties list using the `atomvm` key containing a `start` and `flash_offset` entry:
+Edit the generated `mix.exs` to include the ExAtomVM dependency (`{:exatomvm, git: "https://github.com/atomvm/ExAtomVM/"}`), and add a properties list using the `atomvm` key containing a `start` entry and optionally `esp32_flash_offset` and/or `stm32_flash_offset` entries (flash offset is not used by Raspberry Pi RP2 devices):
 
     ## elixir
     defmodule MyProject.MixProject do
@@ -63,7 +63,8 @@ Edit the generated `mix.exs` to include the ExAtomVM dependency (`{:exatomvm, gi
             deps: deps(),
             atomvm: [
               start: MyProject,
-              flash_offset: 0x210000
+              esp32_flash_offset: 0x250000,
+              stm32_flash_offset: 0x8080000
             ]
         ]
         end
@@ -284,7 +285,8 @@ To use this Mix plugin, add `ExAtomVM` to the dependencies list in your `mix.exs
         ...
         atomvm: [
             start: HelloWorld,
-            flash_offset: 0x210000
+            esp32_flash_offset: 0x250000,
+            stm32_flash_offset: 0x8080000
         ]
       ]
     end
@@ -319,16 +321,14 @@ The `atomvm.esp32.flash` task is used to flash your application to a micro-contr
 
 > Note.  Before running this task, you must flash the AtomVM virtual machine to the device.  See the [Getting Started](https://www.atomvm.net/doc/master/getting-started-guide.html) section if the [AtomVM documentation](https://www.atomvm.net/doc/master/) for information about how to flash the AtomVM image to a device.
 
-The `atomvm` properties list in the Mix project file (`mix.exs`) may contain the following entries related to this task:
+The `atomvm` properties list in the Mix project file (`mix.exs`) may contain the following entries related to this task. These properties may also be over-ridden on the command line when running `mix` by using long-style flags:
 
-| Key | Type | Default | Value |
-|-----|------|----------|-------|
-| `flash_offset` | Address in hexademical format | 0x210000 | The name of the module containing the `start/0` entrypoint function |
-| `chip` | `esp32` | `esp32` | Chip type |
-| `port` | device path | `/dev/ttyUSB0` | Port to which device is connected on host computer |
-| `baud` | integer | 115200 | BAUD rate used when flashing to device |
-
-Properties in the `mix.exs` file may be over-ridden on the command line using long-style flags (prefixed by `--`) by the same name as the properties key.  For example, you can use the `--port` option to specify or override the `port` property in the above table.
+| Key | Type | Default | Value | Command line override |
+|-----|------|----------|------|-----------------------|
+| `esp32_flash_offset` | integer (hexademical format) | `0x250000` | The flash offset address to begin flashing to | `--flash_offset`|
+| `chip` | string | `auto` | ESP32 chip variant | `--chip` |
+| `port` | device path | `/dev/ttyUSB0` | Port to which device is connected on host computer | `--port` |
+| `baud` | integer | `115200` | BAUD rate used when flashing to device | `--baud` |
 
 If the `IDF_PATH` environment variable is set, then the `esptool.py` from the [IDF SDK](https://docs.espressif.com/projects/esp-idf/en/latest/esp32/index.html) installation will be used to flash the application to the ESP32 device.  Otherwise, this plugin will attempt to use the `esptool.py` program from the user's `PATH` environment variable.  The [ESP Tool](https://github.com/espressif/esptool) Python3 application can be installed from source or via many popular package managers.  Consult your local OS documentation for more information.
 
@@ -370,14 +370,12 @@ The `atomvm.stm32.flash` task is used to flash your application to a micro-contr
 
 > Note.  Before running this task, you must flash the AtomVM virtual machine to the device.  See the [Getting Started](https://www.atomvm.net/doc/master/getting-started-guide.html) section if the [AtomVM documentation](https://www.atomvm.net/doc/master/) for information about how to flash the AtomVM image to a device.
 
-The `atomvm` properties list in the Mix project file (`mix.exs`) may contain the following entries related to this task:
+The `atomvm` properties list in the Mix project file (`mix.exs`) may contain the following entries related to this task. These properties may also be over-ridden on the command line when running `mix` by using long-style flags:
 
-| Key | Type | Default | Value |
-|-----|------|----------|-------|
-| `stflash_path` | string | undefined | The full path to the `st-flash` utility, if not in users PATH |
-| `flash_offset` | Address in hexademical format | 0x8080000 | The beginning flash address to write to  |
-
-Properties in the `mix.exs` file may be over-ridden on the command line using long-style flags (prefixed by `--`) by the same name as the properties key.  For example, you can use the `--stflash_path` option to specify or override the `stflash_path` property in the above table.
+| Key | Type | Default | Value | Command line override |
+|-----|------|---------|-------|-----------------------|
+| `stflash_path` | string | undefined | The full path to the `st-flash` utility, if not in users PATH | `--stflash_path` |
+| `stm32_flash_offset` | integer (hexademical format) | `0x8080000` | The beginning flash address to write to | `--flash_offset` |
 
 Example:
 
