@@ -1646,3 +1646,4 @@ Elixir.WithClauseError:module_info/1
 Elixir.WithClauseError:__struct__/0
 Elixir.WithClauseError:__struct__/1
 elixir_env:to_caller/1
+elixir_erl_pass:no_parens_remote/2
