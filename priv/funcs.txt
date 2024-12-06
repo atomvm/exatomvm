@@ -276,11 +276,16 @@ erlang:error/2
 erlang:error/3
 erlang:exit/1
 erlang:exit/2
+erlang:fadd/2
+erlang:fdiv/2
 erlang:float_to_binary/1
 erlang:float_to_binary/2
 erlang:float_to_list/1
 erlang:float_to_list/2
 erlang:floor/1
+erlang:fmul/2
+erlang:fnegate/1
+erlang:fsub/2
 erlang:function_exported/3
 erlang:fun_to_list/1
 erlang:garbage_collect/0
