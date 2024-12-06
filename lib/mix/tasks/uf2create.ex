@@ -13,7 +13,7 @@ defmodule Mix.Tasks.Atomvm.Uf2create do
       app_start =
         parse_addr(Keyword.get(avm_config, :app_start, Map.get(options, :app_start, System.get_env("ATOMVM_PICO_APP_START", "0x10180000"))))
       family_id =
-        validate_fam(Keyword.get(avm_config, :family_id, Map.get(options, :family_id, System.get_env("ATOMVM_PICO_UF2_FAMILY", "rp2040"))))
+        validate_fam(Keyword.get(avm_config, :family_id, Map.get(options, :family_id, System.get_env("ATOMVM_PICO_UF2_FAMILY", :universal))))
 
       :ok = :uf2tool.uf2create("#{config[:app]}.uf2", family_id, app_start, "#{config[:app]}.avm")
       IO.puts("Created #{config[:app]}.uf2")
@@ -72,9 +72,18 @@ defmodule Mix.Tasks.Atomvm.Uf2create do
       "rp2040" -> :rp2040
       ":rp2040" -> :rp2040
       :rp2040 -> :rp2040
-      "rp2035" -> :data
-      ":rp2035" -> :data
-      :rp2035 -> :data
+      "rp2035_riscv" -> :rp2035_riscv
+      ":rp2035_riscv" -> :rp2035_riscv
+      :rp2035_riscv -> :rp2035_riscv
+      "rp2035_arm_s" -> :rp2035_arm_s
+      ":rp2035_arm_s" -> :rp2035_arm_s
+      :rp2035_arm_s -> :rp2035_arm_s
+      "rp2035_arm_ns" -> :rp2035_arm_ns
+      ":rp2035_arm_ns" -> :rp2035_arm_ns
+      :rp2035_arm_ns -> :rp2035_arm_ns
+      "absolute" -> :absolute
+      ":absolute" -> :absolute
+      :universal -> :absolute
       "data" -> :data
       ":data" -> :data
       :data -> :data

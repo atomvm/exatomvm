@@ -439,5 +439,6 @@ The `atomvm` properties list in the Mix project file (`mix.exs`) may contain the
 | Key | Type | Default | Value |
 |-----|------|----------|-------|
 | `app_start` | Address in hexademical format | 0x10180000 | The flash address to place the application |
+| `family_id` | atom or string | `universal` | The flavor of uf2 to create; `rp2040`, `rp2350_riscv`, `rp2350_arm_s`, `rp2350_arm_ns`, `data`, `absolute`, or `universal` |
 
 Properties in the `mix.exs` file may be over-ridden on the command line using long-style flags (prefixed by `--`) by the same name as the properties key.  For example, you can use the `--app_start` option to specify or override the `app_start` property in the above table.
