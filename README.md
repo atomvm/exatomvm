@@ -63,7 +63,7 @@ Edit the generated `mix.exs` to include the ExAtomVM dependency (`{:exatomvm, gi
             deps: deps(),
             atomvm: [
               start: MyProject,
-              flash_offset: 0x210000
+              flash_offset: 0x250000
             ]
         ]
         end
@@ -258,7 +258,7 @@ To flash your project to an ESP32 device, use the `atomvm.esp32.flash` mix task.
         ###########################################################
 
     I (130) AtomVM: Starting AtomVM revision 0.5.0
-    I (130) AtomVM: Loaded BEAM partition main.avm at address 0x210000 (size=1048576 bytes)
+    I (130) AtomVM: Loaded BEAM partition main.avm at address 0x250000 (size=1048576 bytes)
     I (160) atomvm_adc: eFuse Two Point: NOT supported
     I (160) atomvm_adc: eFuse Vref: Supported
     I (160) AtomVM: Found startup beam Elixir.MyProject.beam
@@ -284,7 +284,7 @@ To use this Mix plugin, add `ExAtomVM` to the dependencies list in your `mix.exs
         ...
         atomvm: [
             start: HelloWorld,
-            flash_offset: 0x210000
+            flash_offset: 0x250000
         ]
       ]
     end
@@ -323,7 +323,7 @@ The `atomvm` properties list in the Mix project file (`mix.exs`) may contain the
 
 | Key | Type | Default | Value |
 |-----|------|----------|-------|
-| `flash_offset` | Address in hexademical format | 0x210000 | The name of the module containing the `start/0` entrypoint function |
+| `flash_offset` | Address in hexademical format | 0x250000 | The name of the module containing the `start/0` entrypoint function |
 | `chip` | `esp32` | `esp32` | Chip type |
 | `port` | device path | `/dev/ttyUSB0` | Port to which device is connected on host computer |
 | `baud` | integer | 115200 | BAUD rate used when flashing to device |
