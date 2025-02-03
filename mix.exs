@@ -7,7 +7,18 @@ defmodule ExAtomVM.MixProject do
       version: "0.1.0",
       elixir: "~> 1.8",
       start_permanent: Mix.env() == :prod,
-      deps: deps()
+      deps: deps(),
+
+      # Docs
+      name: "ExAtomVM",
+      source_url: "https://github.com/atomvm/exatomvm",
+      homepage_url: "https://www.atomvm.net/",
+      docs: [
+        # The main page in the docs
+        main: "ExAtomVM",
+        # logo: "path/to/logo.png",
+        extras: ["README.md"]
+      ]
     ]
   end
 
@@ -21,7 +32,8 @@ defmodule ExAtomVM.MixProject do
   # Run "mix help deps" to learn about dependencies.
   defp deps do
     [
-      {:uf2tool,  "1.1.0"}
+      {:uf2tool, "1.1.0"},
+      {:ex_doc, "~> 0.20", only: :dev, runtime: false}
       # {:dep_from_hexpm, "~> 0.3.0"},
       # {:dep_from_git, git: "https://github.com/elixir-lang/my_dep.git", tag: "0.1.0"}
     ]

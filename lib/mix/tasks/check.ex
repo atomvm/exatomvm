@@ -1,4 +1,17 @@
 defmodule Mix.Tasks.Atomvm.Check do
+  use Mix.Task
+  @shortdoc "Check application code for use of unsupported instructions"
+
+  @moduledoc """
+  Verifies that the functions and modules used are either part of the application source (or deps) or supported by AtomVM.
+
+  The check will catch the use of any standard Elixir modules or functions used in the application that are not included in exavmlib.
+
+  > #### Info {: .info}
+  >
+  > Note. The `Mix.Tasks.Atomvm.Packbeam` task depends on this one, so users will likely never need to use it directly.
+  """
+
   alias Mix.Project
 
   def run(args) do
@@ -201,6 +214,7 @@ defmodule Mix.Tasks.Atomvm.Check do
           you must remove the parentheses: map.field
         """)
       end
+
       IO.puts("error: following missing instructions are used:")
       print_list(missing_instructions)
       IO.puts("")

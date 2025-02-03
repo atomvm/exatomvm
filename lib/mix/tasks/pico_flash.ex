@@ -1,5 +1,53 @@
 defmodule Mix.Tasks.Atomvm.Pico.Flash do
   use Mix.Task
+
+  @shortdoc "Flash the application to a pico micro-controller"
+
+  @moduledoc """
+  Flashes the application to a Raspberry Pi RP2
+
+  You can build with all boards supported by Raspberry Pi pico SDK, including Pico, Pico-W and Pico2.
+  AtomVM also works with clones such as RP2040 Zero.
+
+  > #### Important {: .warning}
+  >
+  > Before running this task, you must flash the AtomVM virtual machine to the target device.
+  >
+  > The pico provided partition is expected to be mounted. MacOS and most Linux desktop environments will do this automatically, for some it will need to be setup by the user.
+
+  ## Usage example
+
+  Within your AtomVM mix project run
+
+  `
+  $ mix atomvm.pico.flash
+  `
+
+  Or with optional flags (which will override the config in mix.exs)
+
+  `
+  $ mix atomvm.pico.flash --picotool /some/path
+  `
+
+  ## Configuration
+
+  ExAtomVM can be configured from the mix.ex file and supports the following settings for the
+  `atomvm.pico.flash` task.
+
+    * `:pico_path` - The full path to the pico mount point, defaults to `"/run/media/${USER}/RPI-RP2"` on linux; `"/Volumes/RPI-RP2"` on darwin (Mac)
+
+    * `:pico_reset` - The full path to the pico device to reset if required, default `"/dev/ttyACM*"` on linux; `"/dev/cu.usbmodem14*"` on darwin (Mac)
+
+    * `:picotool` - The full path to picotool executable (currently optional), default `undefined`
+
+  ## Command line options
+
+  Properties in the mix.exs file may be over-ridden on the command line using long-style flags (prefixed by --) by the same name
+  as the [supported properties](#module-configuration)
+
+  For example, you can use the `--picotool` option to specify or override the `picotool` property.
+  """
+
   alias Mix.Project
   alias Mix.Tasks.Atomvm.Uf2create
 
@@ -9,12 +57,38 @@ defmodule Mix.Tasks.Atomvm.Pico.Flash do
     with {:atomvm, {:ok, avm_config}} <- {:atomvm, Keyword.fetch(config, :atomvm)},
          {:args, {:ok, options}} <- {:args, parse_args(args)},
          {:uf2, :ok} <- {:uf2, Uf2create.run(args)} do
-      pico_path = 
-        Map.get(options, :pico_path, Keyword.get(avm_config, :pico_path, System.get_env("ATOMVM_PICO_MOUNT_PATH", get_default_mount())))
+      pico_path =
+        Map.get(
+          options,
+          :pico_path,
+          Keyword.get(
+            avm_config,
+            :pico_path,
+            System.get_env("ATOMVM_PICO_MOUNT_PATH", get_default_mount())
+          )
+        )
+
       pico_reset =
-        Map.get(options, :pico_reset, Keyword.get(avm_config, :pico_reset, System.get_env("ATOMVM_PICO_RESET_DEV", get_reset_base())))
+        Map.get(
+          options,
+          :pico_reset,
+          Keyword.get(
+            avm_config,
+            :pico_reset,
+            System.get_env("ATOMVM_PICO_RESET_DEV", get_reset_base())
+          )
+        )
+
       picotool =
-        Map.get(options, :picotool, Keyword.get(avm_config, :picotool, System.get_env("ATOMVM_PICOTOOL_PATH", "#{:os.find_executable(~c"picotool")}")))
+        Map.get(
+          options,
+          :picotool,
+          Keyword.get(
+            avm_config,
+            :picotool,
+            System.get_env("ATOMVM_PICOTOOL_PATH", "#{:os.find_executable(~c"picotool")}")
+          )
+        )
 
       do_flash(pico_path, pico_reset, picotool)
     else
@@ -70,13 +144,16 @@ defmodule Mix.Tasks.Atomvm.Pico.Flash do
         case Map.get(filestat, :type) do
           :directory ->
             :ok
+
           _ ->
             IO.puts("Object found at #{mount} is not a directory")
             exit({:shutdown, 1})
         end
+
       {:error, :enoent} ->
         Process.sleep(1000)
         wait_for_mount(mount, count + 1)
+
       error ->
         IO.puts("unexpected error: #{error} while checking pico mount path.")
         exit({:shutdown, 1})
@@ -94,10 +171,12 @@ defmodule Mix.Tasks.Atomvm.Pico.Flash do
         case Map.get(info, :type) do
           :directory ->
             :ok
+
           _ ->
             IO.puts("error: object at pico mount path not a directory. Abort!")
             exit({:shutdown, 1})
         end
+
       _ ->
         IO.puts("error: Pico not mounted. Abort!")
         exit({:shutdown, 1})
@@ -123,6 +202,7 @@ defmodule Mix.Tasks.Atomvm.Pico.Flash do
     case Path.wildcard(resetdev) do
       [] ->
         false
+
       [device | _t] ->
         case File.stat(device) do
           {:ok, info} ->
@@ -130,9 +210,11 @@ defmodule Mix.Tasks.Atomvm.Pico.Flash do
               :device -> {true, device}
               _ -> false
             end
+
           _ ->
             false
         end
+
       _ ->
         false
     end
@@ -146,25 +228,40 @@ defmodule Mix.Tasks.Atomvm.Pico.Flash do
       {"", 0} ->
         # Pause to let the device settle
         Process.sleep(200)
+
       error ->
         case picotool do
           false ->
-            IO.puts("Error: #{error}\nUnable to locate 'picotool', close the serial monitor before flashing, or install picotool for automatic disconnect and BOOTSEL mode.")
+            IO.puts(
+              "Error: #{error}\nUnable to locate 'picotool', close the serial monitor before flashing, or install picotool for automatic disconnect and BOOTSEL mode."
+            )
+
             exit({:shutdown, 1})
+
           _ ->
-            IO.puts("Warning: #{error}\nFor faster flashing remember to disconnect serial monitor first.")
+            IO.puts(
+              "Warning: #{error}\nFor faster flashing remember to disconnect serial monitor first."
+            )
+
             reset_args = ["reboot", "-f", "-u"]
-            IO.puts("Disconnecting serial monitor with `picotool #{:lists.join(" ", reset_args)}` in 5 seconds...")
+
+            IO.puts(
+              "Disconnecting serial monitor with `picotool #{:lists.join(" ", reset_args)}` in 5 seconds..."
+            )
+
             Process.sleep(5000)
+
             case :string.trim(System.cmd(picotool, reset_args)) do
               {status, 0} ->
                 case status do
                   "The device was asked to reboot into BOOTSEL mode." ->
                     :ok
+
                   pt_error ->
                     IO.puts("Failed to prepare pico for flashing: #{pt_error}")
                     exit({:shutdown, 1})
                 end
+
               _ ->
                 IO.puts("Failed to prepare pico for flashing: #{error}")
             end
@@ -176,6 +273,7 @@ defmodule Mix.Tasks.Atomvm.Pico.Flash do
     case needs_reset(pico_reset) do
       false ->
         :ok
+
       {true, reset_port} ->
         do_reset(reset_port, picotool)
         IO.puts("Waiting for the device at path #{pico_path} to settle and mount...")
@@ -183,7 +281,14 @@ defmodule Mix.Tasks.Atomvm.Pico.Flash do
     end
 
     check_pico_mount(pico_path)
-    _bytes = File.copy!("#{Project.config()[:app]}.uf2", "#{pico_path}/#{Project.config()[:app]}.uf2", :infinity)
+
+    _bytes =
+      File.copy!(
+        "#{Project.config()[:app]}.uf2",
+        "#{pico_path}/#{Project.config()[:app]}.uf2",
+        :infinity
+      )
+
     IO.puts("Successfully loaded #{Project.config()[:app]} to the pico device at #{pico_path}.")
   end
 end

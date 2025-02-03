@@ -1,5 +1,38 @@
 defmodule Mix.Tasks.Atomvm.Packbeam do
   use Mix.Task
+
+  @shortdoc "Bundle the application into an AVM file"
+
+  @moduledoc """
+  Bundle an application into an AVM file that can be flashed to a micro-controller and (or directly on a unix host) executed by the AtomVM virtual machine.
+
+  > #### Info {: .info}
+  >
+  > Normally using this task manually is not required, it is called automatically by `atomvm.esp32.flash`, `atomvm.stm32.flash` and `atomvm.pico.flash`.
+
+  ## Usage example
+
+  Within your AtomVM mix project run
+
+  `
+  $ mix atomvm.packbeam
+  `
+
+  ## Configuration
+
+  ExAtomVM can be configured from the mix.ex file and supports the following settings for the
+  `atomvm.packbeam` task.
+
+    * `:start` - The name of the module containing the start/0 entrypoint function. Only to be used to override the `:start` options defined in the the projects `mix.exs` This would not normally be needed, unless the user had an alternate mode of operation e.g like a client/server app that normally builds the client, but when building the server uses a different start module.
+
+  ## Command line options
+
+  Properties in the mix.exs file may be over-ridden on the command line using long-style flags (prefixed by --) by the same name
+  as the [supported properties](#module-configuration)
+
+  For example, you can use the `--start` option to specify or override the `start` property.
+  """
+
   alias ExAtomVM.PackBEAM
   alias Mix.Project
   alias Mix.Tasks.Atomvm.Check
