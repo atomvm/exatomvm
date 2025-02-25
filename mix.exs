@@ -21,9 +21,9 @@ defmodule ExAtomVM.MixProject do
   # Run "mix help deps" to learn about dependencies.
   defp deps do
     [
-      {:uf2tool,  "1.1.0"}
-      # {:dep_from_hexpm, "~> 0.3.0"},
-      # {:dep_from_git, git: "https://github.com/elixir-lang/my_dep.git", tag: "0.1.0"}
+      {:uf2tool, "1.1.0"},
+      {:pythonx, "~> 0.4.0", runtime: false, optional: true},
+      {:req, "~> 0.5.0", runtime: false, optional: true}
     ]
   end
 end
