@@ -158,10 +158,11 @@ defmodule Mix.Tasks.Atomvm.Packbeam do
     end
   end
 
-  def runtime_deps(deps) do
+  def runtime_deps(deps, is_runtime_dep \\ false) do
     Enum.reduce(deps, [], fn dep, acc ->
-      if Keyword.get(dep.opts, :runtime, true) do
-        ["#{dep.opts[:build]}/ebin" | runtime_deps(dep.deps) ++ acc]
+      if Keyword.get(dep.opts, :runtime, true) and
+           (is_runtime_dep == true or dep.top_level == true) do
+        ["#{dep.opts[:build]}/ebin" | runtime_deps(dep.deps, true) ++ acc]
       else
         acc
       end
