@@ -130,7 +130,9 @@ defmodule ExAtomVM.PackBEAM do
   end
 
   defp pack_files(modules) do
-    Enum.reduce_while(modules, {:ok, []}, fn {module, opts}, {:ok, acc} ->
+    modules
+    |> Enum.uniq()
+    |> Enum.reduce_while({:ok, []}, fn {module, opts}, {:ok, acc} ->
       case pack_file(module, opts) do
         {:ok, res} -> {:cont, {:ok, [acc | res]}}
         error -> {:halt, error}
