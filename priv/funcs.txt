@@ -441,7 +441,11 @@ esp:nvs_put_binary/3
 esp:nvs_reformat/0
 esp:nvs_set_binary/2
 esp:nvs_set_binary/3
+esp:partition_erase_range/2
+esp:partition_erase_range/3
+esp:partition_read/3
 esp:partition_list/0
+esp:partition_write/3
 esp:reset_reason/0
 esp:restart/0
 esp:rtc_slow_get_binary/0
