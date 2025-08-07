@@ -116,8 +116,21 @@ defmodule Mix.Tasks.Atomvm.Esp32.Flash do
 
     tool_args = if port == "auto", do: tool_args, else: ["--port", port] ++ tool_args
 
-    tool_full_path = get_esptool_path(idf_path)
-    System.cmd(tool_full_path, tool_args, stderr_to_stdout: true, into: IO.stream(:stdio, 1))
+    case Code.ensure_loaded(Pythonx) do
+      {:module, Pythonx} ->
+        IO.inspect("Flashing using Pythonx installed esptool..")
+        ExAtomVM.EsptoolHelper.setup()
+
+        case ExAtomVM.EsptoolHelper.flash_pythonx(tool_args) do
+          true -> exit({:shutdown, 0})
+          false -> exit({:shutdown, 1})
+        end
+
+      _ ->
+        IO.inspect("Flashing using esptool..")
+        tool_full_path = get_esptool_path(idf_path)
+        System.cmd(tool_full_path, tool_args, stderr_to_stdout: true, into: IO.stream(:stdio, 1))
+    end
   end
 
   defp get_esptool_path(<<"">>) do
