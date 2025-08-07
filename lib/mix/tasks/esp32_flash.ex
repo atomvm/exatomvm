@@ -1,5 +1,62 @@
 defmodule Mix.Tasks.Atomvm.Esp32.Flash do
   use Mix.Task
+
+  @shortdoc "Flash the application to an ESP32 micro-controller"
+
+  @moduledoc """
+  Flashes the application to an ESP32 micro-controller.
+
+  > #### Important {: .warning}
+  >
+  > Before running this task, you must flash the AtomVM virtual machine to the target device.
+  >
+  > This tasks depends on `esptool` and can be installed using package managers:
+  >  - linux (debian): apt install esptool
+  >  - macos: brew install esptool
+  >  - or follow these [installation instructions](https://docs.espressif.com/projects/esptool/en/latest/esp32/installation.html#installation) when not available through a package manager.
+
+  ## Usage example
+
+  Within your AtomVM mix project run
+
+  `
+  $ mix atomvm.esp32.flash
+  `
+
+  Or with optional flags (which will override the config in mix.exs)
+
+  `
+  $ mix atomvm.esp32.flash --port /dev/tty.usbserial-0001
+  `
+
+  Or detect the port automatically with
+
+  `
+  $ mix atomvm.esp32.flash --port auto
+  `
+
+  ## Configuration
+
+  ExAtomVM can be configured from the mix.ex file and supports the following settings for the
+  `atomvm.esp32.flash` task.
+
+    * `:flash_offset` - The start address of the flash to write the application to in hexademical format,
+      defaults to `0x250000`.
+
+    * `:chip` - Chip type, defaults to `auto`.
+
+    * `:port` - The port to which device is connected on the host computer, defaults to `/dev/ttyUSB0`.
+
+    * `:baud` - The BAUD rate used when flashing to device, defaults to `115200`.
+
+  ## Command line options
+
+  Properties in the mix.exs file may be over-ridden on the command line using long-style flags (prefixed by --) by the same name
+  as the [supported properties](#module-configuration)
+
+  For example, you can use the `--port` option to specify or override the port property.
+  """
+
   alias Mix.Project
   alias Mix.Tasks.Atomvm.Packbeam
 
