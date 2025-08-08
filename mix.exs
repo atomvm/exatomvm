@@ -32,7 +32,7 @@ defmodule ExAtomVM.MixProject do
   # Run "mix help deps" to learn about dependencies.
   defp deps do
     [
-      {:uf2tool, "1.1.0"},
+      {:uf2tool, "1.1.0", runtime: false},
       {:ex_doc, "~> 0.20", only: :dev, runtime: false},
       {:pythonx, "~> 0.4.0", runtime: false, optional: true},
       {:req, "~> 0.5.0", runtime: false, optional: true}

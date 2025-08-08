@@ -19,7 +19,7 @@ defmodule ExAtomVM.EsptoolHelper do
         version = "0.0.0"
         requires-python = "==3.13.*"
         dependencies = [
-          "esptool @ git+https://github.com/espressif/esptool.git@6f0d779"
+          "esptool==5.0.2"
         ]
         """)
 
