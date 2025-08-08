@@ -36,6 +36,21 @@ defmodule ExAtomVM.EsptoolHelper do
       if not Enum.member?(tool_args, "--port") do
         selected_device = select_device()
 
+        if not Map.get(selected_device, "atomvm_installed", false) do
+          IO.puts("""
+
+            AtomVM doesn't seem to be installed on #{selected_device["chip_family_name"]}!
+
+            Install using 'mix atomvm.esp32.install' or
+
+            https://doc.atomvm.org/main/getting-started-guide.html#flashing-a-binary-image-to-esp32
+
+            (override check using 'mix atomvm.esp32.flash --port #{selected_device["port"]}')
+          """)
+
+          exit({:shutdown, 1})
+        end
+
         ["--port", selected_device["port"]] ++ tool_args
       else
         tool_args
@@ -217,7 +232,7 @@ defmodule ExAtomVM.EsptoolHelper do
           |> Enum.with_index(1)
           |> Enum.each(fn {device, index} ->
             IO.puts(
-              "#{index}. #{device["chip_family_name"]} - Port: #{device["port"]} MAC: #{device["mac_address"]}"
+              "#{index}. #{String.pad_trailing(device["chip_family_name"], 8, " ")} MAC: #{device["mac_address"]} AtomVM installed: #{format_atomvm_status(device["atomvm_installed"])} - Port: #{device["port"]}"
             )
           end)
 
@@ -238,4 +253,7 @@ defmodule ExAtomVM.EsptoolHelper do
 
     selected_device
   end
+
+  def format_atomvm_status(true), do: "✅"
+  def format_atomvm_status(_), do: "❌"
 end

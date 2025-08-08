@@ -118,7 +118,7 @@ defmodule Mix.Tasks.Atomvm.Esp32.Flash do
 
     case Code.ensure_loaded(Pythonx) do
       {:module, Pythonx} ->
-        IO.inspect("Flashing using Pythonx installed esptool..")
+        IO.puts("Flashing using Pythonx installed esptool..")
         ExAtomVM.EsptoolHelper.setup()
 
         case ExAtomVM.EsptoolHelper.flash_pythonx(tool_args) do
@@ -127,7 +127,7 @@ defmodule Mix.Tasks.Atomvm.Esp32.Flash do
         end
 
       _ ->
-        IO.inspect("Flashing using esptool..")
+        IO.puts("Flashing using esptool..")
         tool_full_path = get_esptool_path(idf_path)
         System.cmd(tool_full_path, tool_args, stderr_to_stdout: true, into: IO.stream(:stdio, 1))
     end

@@ -3,13 +3,14 @@ defmodule Mix.Tasks.Atomvm.Esp32.Info do
   Mix task to get information about connected ESP32 devices.
   """
   use Mix.Task
+  alias ExAtomVM.EsptoolHelper
 
   @shortdoc "Get information about connected ESP32 devices"
 
   @impl Mix.Task
   def run(_args) do
-    with :ok <- ExAtomVM.EsptoolHelper.setup(),
-         devices <- ExAtomVM.EsptoolHelper.connected_devices() do
+    with :ok <- EsptoolHelper.setup(),
+         devices <- EsptoolHelper.connected_devices() do
       case length(devices) do
         0 ->
           IO.puts(
@@ -23,7 +24,7 @@ defmodule Mix.Tasks.Atomvm.Esp32.Info do
       if length(devices) > 1 do
         Enum.each(devices, fn device ->
           IO.puts(
-            "#{format_atomvm_status(device["atomvm_installed"])}#{device["chip_family_name"]} - Port: #{device["port"]}"
+            "#{EsptoolHelper.format_atomvm_status(device["atomvm_installed"])}#{String.pad_trailing(device["chip_family_name"], 8, " ")} - Port: #{device["port"]}"
           )
         end)
       end
@@ -32,7 +33,7 @@ defmodule Mix.Tasks.Atomvm.Esp32.Info do
         IO.puts("\n━━━━━━━━━━━━━━━━━━━━━━")
 
         IO.puts(
-          "#{format_atomvm_status(device["atomvm_installed"])}#{device["chip_family_name"]} - Port: #{device["port"]}"
+          "#{EsptoolHelper.format_atomvm_status(device["atomvm_installed"])}#{device["chip_family_name"]} - Port: #{device["port"]}"
         )
 
         IO.puts("USB_MODE: #{device["usb_mode"]}")
@@ -100,7 +101,4 @@ defmodule Mix.Tasks.Atomvm.Esp32.Info do
   end
 
   defp sanitize_string(_), do: "<invalid>"
-
-  defp format_atomvm_status(true), do: "✅"
-  defp format_atomvm_status(_), do: "❌"
 end
