@@ -17,7 +17,20 @@ defmodule ExAtomVM.PackBEAM do
   defp uncompress_literals(chunks) do
     with {~c"LitT", litt} <- List.keyfind(chunks, ~c"LitT", 0),
          <<_header::binary-size(4), data::binary>> <- litt do
-      litu = :zlib.uncompress(data)
+      litu =
+        case data do
+          # RFC 1950: Valid zlib header when (CMF*256 + FLG) % 31 == 0
+          <<0x78, flag, _rest::binary>> when rem(0x78 * 256 + flag, 31) == 0 ->
+            try do
+              :zlib.uncompress(data)
+            rescue
+              _error -> data
+            end
+
+          # OTP 28 compatibility: data is not compressed
+          _ ->
+            data
+        end
 
       chunks
       |> List.keyreplace(~c"LitT", 0, {~c"LitU", litu})
