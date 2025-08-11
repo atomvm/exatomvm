@@ -180,12 +180,6 @@ defmodule Mix.Tasks.Atomvm.Packbeam do
           {:ok, Path.join(prefix, "lib/AtomVM/ebin/")}
         else
           _ ->
-            IO.puts("No avm_deps directory found.")
-
-            IO.puts(
-              "This message can be safely ignored when standard libraries are already flashed to lib partition."
-            )
-
             {:error, :no_avm_deps_path}
         end
     end
