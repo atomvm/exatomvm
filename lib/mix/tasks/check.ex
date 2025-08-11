@@ -184,11 +184,13 @@ defmodule Mix.Tasks.Atomvm.Check do
     missing = MapSet.difference(calls_set, avail_funcs)
 
     if MapSet.size(missing) != 0 do
-      IO.puts("error: following modules or functions are not available on AtomVM:")
+      IO.puts("Warning: following modules or functions are not available on AtomVM:")
       print_list(missing)
       IO.puts("")
+      IO.puts("(Using them may not be supported; make sure ExAtomVM is fully updated.)")
+      IO.puts("")
 
-      :error
+      :ok
     else
       :ok
     end
@@ -215,11 +217,13 @@ defmodule Mix.Tasks.Atomvm.Check do
         """)
       end
 
-      IO.puts("error: following missing instructions are used:")
+      IO.puts("Warning: following missing instructions are used:")
       print_list(missing_instructions)
       IO.puts("")
+      IO.puts("(Using them may not be supported; make sure ExAtomVM is fully updated.)")
+      IO.puts("")
 
-      :error
+      :ok
     else
       :ok
     end
