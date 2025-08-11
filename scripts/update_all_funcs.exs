@@ -3,10 +3,14 @@
 Code.require_file("analyze_funcs_diff.exs", __DIR__)
 defmodule AllFuncsUpdater do
   @moduledoc """
-  Script assumes that AtomVM is in same parent directory as ExAtomVM and that
+  Script to update priv/funcs.txt with all available functions from AtomVM sources.
+  By default, assumes AtomVM is in the same parent directory as ExAtomVM and that
   AtomVM has been built in the AtomVM/build directory.
 
-  run using 'elixir scripts/update_all_funcs.exs' in project root.
+  Usage:
+    elixir scripts/update_all_funcs.exs [atomvm_path]
+
+  If atomvm_path is not provided, defaults to "../AtomVM".
 
   Updates priv/funcs.txt with all available functions from AtomVM sources.
 
@@ -19,18 +23,22 @@ defmodule AllFuncsUpdater do
   implementation details. The final list is sorted with Erlang functions
   first, followed by Elixir functions.
   """
-  @nifs_gperf_path "../AtomVM/src/libAtomVM/nifs.gperf"
-  @estdlib_beam_path "../AtomVM/build/libs/estdlib/src/beams"
-  @erlang_beam_path "../AtomVM/build/libs/eavmlib/src/beams"
-  @elixir_beam_path "../AtomVM/build/libs/exavmlib/lib/beams"
+  @default_atomvm_path "../AtomVM"
+  @nifs_gperf_path "src/libAtomVM/nifs.gperf"
+  @estdlib_beam_path  "build/libs/estdlib/src/beams"
+  @erlang_beam_path  "build/libs/eavmlib/src/beams"
+  @elixir_beam_path  "build/libs/exavmlib/lib/beams"
   @funcs_txt_path "priv/funcs.txt"
 
-  def run do
+  def default_atomvm_path, do: @default_atomvm_path
+
+  def run(atomvm_path \\ @default_atomvm_path) do
     IO.puts("Updating #{@funcs_txt_path}...")
+    IO.puts("Using AtomVM path: #{atomvm_path}")
 
     try do
-      nifs = extract_nifs()
-      beams = extract_beams()
+      nifs = extract_nifs(atomvm_path)
+      beams = extract_beams(atomvm_path)
 
       all_funcs = (read_current() ++ nifs ++ beams)
                   |> Enum.uniq()
@@ -59,8 +67,8 @@ defmodule AllFuncsUpdater do
     end
   end
 
-  defp extract_nifs do
-    path = @nifs_gperf_path
+  defp extract_nifs(atomvm_path) do
+    path = Path.join(atomvm_path, @nifs_gperf_path)
 
     if File.exists?(path) do
       path
@@ -74,8 +82,11 @@ defmodule AllFuncsUpdater do
     end
   end
 
-  defp extract_beams do
-    [@estdlib_beam_path, @erlang_beam_path, @elixir_beam_path] |> Enum.flat_map(&extract_from_dir/1) |> Enum.uniq()
+  defp extract_beams(atomvm_path) do
+    [@estdlib_beam_path, @erlang_beam_path, @elixir_beam_path]
+    |> Enum.map(&Path.join(atomvm_path, &1))
+    |> Enum.flat_map(&extract_from_dir/1)
+    |> Enum.uniq()
   end
 
   defp extract_from_dir(path) do
@@ -110,5 +121,13 @@ defmodule AllFuncsUpdater do
 end
 
 # Run the script
-AllFuncsUpdater.run()
+atomvm_path = case System.argv() do
+  [path] -> path
+  [] -> AllFuncsUpdater.default_atomvm_path()
+  _ ->
+    IO.puts("Usage: elixir scripts/update_all_funcs.exs [atomvm_path]")
+    System.halt(1)
+end
+
+AllFuncsUpdater.run(atomvm_path)
 FuncsDiffAnalyzer.run()
