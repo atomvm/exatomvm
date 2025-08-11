@@ -20,6 +20,7 @@ defmodule AllFuncsUpdater do
   first, followed by Elixir functions.
   """
   @nifs_gperf_path "../AtomVM/src/libAtomVM/nifs.gperf"
+  @estdlib_beam_path "../AtomVM/build/libs/estdlib/src/beams"
   @erlang_beam_path "../AtomVM/build/libs/eavmlib/src/beams"
   @elixir_beam_path "../AtomVM/build/libs/exavmlib/lib/beams"
   @funcs_txt_path "priv/funcs.txt"
@@ -74,7 +75,7 @@ defmodule AllFuncsUpdater do
   end
 
   defp extract_beams do
-    [@erlang_beam_path, @elixir_beam_path] |> Enum.flat_map(&extract_from_dir/1) |> Enum.uniq()
+    [@estdlib_beam_path, @erlang_beam_path, @elixir_beam_path] |> Enum.flat_map(&extract_from_dir/1) |> Enum.uniq()
   end
 
   defp extract_from_dir(path) do
