@@ -161,7 +161,7 @@ defmodule Mix.Tasks.Atomvm.Esp32.Flash do
     parse_args(t, Map.put(accum, :chip, chip))
   end
 
-  defp parse_args([<<"--flash_offset">>, "0x" <> hex = flash_offset | t], accum) do
+  defp parse_args([<<"--flash_offset">>, "0x" <> hex = _flash_offset | t], accum) do
     {offset, _} = Integer.parse(hex, 16)
     parse_args(t, Map.put(accum, :flash_offset, offset))
   end
