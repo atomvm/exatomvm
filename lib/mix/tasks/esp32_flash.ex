@@ -121,6 +121,18 @@ defmodule Mix.Tasks.Atomvm.Esp32.Flash do
         IO.puts("Flashing using Pythonx installed esptool..")
         ExAtomVM.EsptoolHelper.setup()
 
+        # avoid deprecation warnings, as we know we are esptool version 5+, when using Pythonx.
+        tool_args =
+          Enum.map(tool_args, fn
+            "--flash_mode" -> "--flash-mode"
+            "--flash_freq" -> "--flash-freq"
+            "--flash_size" -> "--flash-size"
+            "default_reset" -> "default-reset"
+            "hard_reset" -> "hard-reset"
+            "write_flash" -> "write-flash"
+            arg -> arg
+          end)
+
         case ExAtomVM.EsptoolHelper.flash_pythonx(tool_args) do
           true -> exit({:shutdown, 0})
           false -> exit({:shutdown, 1})
