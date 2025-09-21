@@ -1008,6 +1008,7 @@ network_fsm:wait_for_ap/2
 network_fsm:wait_for_sta/0
 network_fsm:wait_for_sta/1
 network_fsm:wait_for_sta/2
+os:getenv/1
 pico:cyw43_arch_gpio_get/1
 pico:cyw43_arch_gpio_put/2
 pico:module_info/0
@@ -1203,6 +1204,7 @@ string:to_lower/1
 string:to_upper/1
 string:trim/1
 string:trim/2
+supervisor:count_children/1
 supervisor:delete_child/2
 supervisor:handle_call/3
 supervisor:handle_cast/2
