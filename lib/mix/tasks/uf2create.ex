@@ -64,7 +64,7 @@ defmodule Mix.Tasks.Atomvm.Uf2create do
           Keyword.get(
             avm_config,
             :family_id,
-            Map.get(options, :family_id, System.get_env("ATOMVM_PICO_UF2_FAMILY", "rp2040"))
+            Map.get(options, :family_id, System.get_env("ATOMVM_PICO_UF2_FAMILY", :universal))
           )
         )
 
@@ -131,14 +131,41 @@ defmodule Mix.Tasks.Atomvm.Uf2create do
       :rp2040 ->
         :rp2040
 
-      "rp2035" ->
-        :data
+      "rp2350_riscv" ->
+        :rp2350_riscv
 
-      ":rp2035" ->
-        :data
+      ":rp2350_riscv" ->
+        :rp2350_riscv
 
-      :rp2035 ->
-        :data
+      :rp2350_riscv ->
+        :rp2350_riscv
+
+      "rp2350_arm_s" ->
+        :rp2350_arm_s
+
+      ":rp2350_arm_s" ->
+        :rp2350_arm_s
+
+      :rp2350_arm_s ->
+        :rp2350_arm_s
+
+      "rp2350_arm_ns" ->
+        :rp2350_arm_ns
+
+      ":rp2350_arm_ns" ->
+        :rp2350_arm_ns
+
+      :rp2350_arm_ns ->
+        :rp2350_arm_ns
+
+      "absolute" ->
+        :absolute
+
+      ":absolute" ->
+        :absolute
+
+      :universal ->
+        :absolute
 
       "data" ->
         :data
