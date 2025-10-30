@@ -794,6 +794,7 @@ io_lib:write_atom/1
 io_lib:write_string/1
 io_lib:write_string/2
 jit:backend_module/0
+jit:variant/0
 json_encoder:encode/1
 json_encoder:module_info/0
 json_encoder:module_info/1
