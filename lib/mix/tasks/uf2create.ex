@@ -64,7 +64,7 @@ defmodule Mix.Tasks.Atomvm.Uf2create do
           Keyword.get(
             avm_config,
             :family_id,
-            Map.get(options, :family_id, System.get_env("ATOMVM_PICO_UF2_FAMILY", :universal))
+            Map.get(options, :family_id, System.get_env("ATOMVM_PICO_UF2_FAMILY", "universal"))
           )
         )
 
