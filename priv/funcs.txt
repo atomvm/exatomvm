@@ -782,6 +782,8 @@ io:put_chars/1
 io:put_chars/2
 io:requests/1
 io:scan_erl_exprs/4
+io:setopts/1
+io:setopts/2
 io_lib:chars_length/1
 io_lib:format/2
 io_lib:fwrite/2
@@ -791,6 +793,7 @@ io_lib:module_info/1
 io_lib:printable_list/1
 io_lib:write/1
 io_lib:write_atom/1
+io_lib:write_binary/3
 io_lib:write_string/1
 io_lib:write_string/2
 jit:backend_module/0
@@ -859,6 +862,7 @@ lists:sort/1
 lists:sort/2
 lists:split/2
 lists:sublist/2
+lists:ukeysort/2
 lists:usort/1
 lists:usort/2
 logger:alert/1
@@ -1041,6 +1045,23 @@ port:call/2
 port:call/3
 port:module_info/0
 port:module_info/1
+proc_lib:init_ack/1
+proc_lib:init_ack/2
+proc_lib:init_p/5
+proc_lib:initial_call/1
+proc_lib:module_info/0
+proc_lib:module_info/1
+proc_lib:spawn/1
+proc_lib:spawn/3
+proc_lib:spawn_link/1
+proc_lib:spawn_link/3
+proc_lib:start/3
+proc_lib:start/4
+proc_lib:start/5
+proc_lib:start_link/3
+proc_lib:start_link/4
+proc_lib:start_link/5
+proc_lib:translate_initial_call/1
 proplists:compact/1
 proplists:delete/2
 proplists:from_map/1
@@ -1218,6 +1239,7 @@ ssl:stop/0
 ssl:terminate/2
 string:find/2
 string:find/3
+string:jaro_similarity/2
 string:length/1
 string:module_info/0
 string:module_info/1
