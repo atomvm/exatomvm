@@ -164,7 +164,7 @@ defmodule Mix.Tasks.Atomvm.Uf2create do
       ":absolute" ->
         :absolute
 
-      :universal ->
+      :absolute ->
         :absolute
 
       "data" ->
