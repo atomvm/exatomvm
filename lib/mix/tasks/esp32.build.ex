@@ -11,6 +11,8 @@ defmodule Mix.Tasks.Atomvm.Esp32.Build do
     * `--ref` - Git reference to checkout - branch, tag, or commit SHA (default: main)
     * `--chip` - Target chip (default: esp32, options: esp32, esp32s2, esp32s3, esp32c2, esp32c3, esp32c6, esp32h2, esp32p4)
     * `--idf-path` - Path to idf.py executable (default: idf.py)
+    * `--use-docker` - Use ESP-IDF Docker image instead of local installation
+    * `--idf-version` - ESP-IDF version for Docker image (default: v5.4.1)
     * `--clean` - Clean build directory before building
 
   ## Examples
@@ -30,6 +32,12 @@ defmodule Mix.Tasks.Atomvm.Esp32.Build do
       # Build for specific chip with clean build
       mix atomvm.esp32.build --atomvm-path /path/to/AtomVM --chip esp32s3 --clean
 
+      # Build using Docker (relative path with ./ is important)
+      mix atomvm.esp32.build --atomvm-path ./_build/atomvm_source/AtomVM/ --use-docker --chip esp32s3
+
+      # Build using Docker with specific IDF version
+      mix atomvm.esp32.build --atomvm-path ./_build/atomvm_source/AtomVM/ --use-docker --idf-version v5.4.1 --chip esp32s3
+
   """
   use Mix.Task
 
@@ -39,6 +47,7 @@ defmodule Mix.Tasks.Atomvm.Esp32.Build do
   @default_ref "main"
   @default_atomvm_url "https://github.com/atomvm/AtomVM"
   @default_idf_path "idf.py"
+  @default_idf_version "v5.4.1"
 
   @impl Mix.Task
   def run(args) do
@@ -50,6 +59,8 @@ defmodule Mix.Tasks.Atomvm.Esp32.Build do
           ref: :string,
           chip: :string,
           idf_path: :string,
+          use_docker: :boolean,
+          idf_version: :string,
           clean: :boolean
         ]
       )
@@ -59,6 +70,8 @@ defmodule Mix.Tasks.Atomvm.Esp32.Build do
     ref = Keyword.get(opts, :ref, @default_ref)
     chip = Keyword.get(opts, :chip, @default_chip)
     idf_path = Keyword.get(opts, :idf_path, @default_idf_path)
+    use_docker = Keyword.get(opts, :use_docker, false)
+    idf_version = Keyword.get(opts, :idf_version, @default_idf_version)
     clean = Keyword.get(opts, :clean, false)
 
     # Use --atomvm-path, --atomvm-url, or default to AtomVM/AtomVM main branch
@@ -86,9 +99,9 @@ defmodule Mix.Tasks.Atomvm.Esp32.Build do
 
     """)
 
-    with :ok <- check_esp_idf(idf_path),
+    with :ok <- check_esp_idf(idf_path, use_docker, idf_version),
          :ok <- build_generic_unix(atomvm_path),
-         :ok <- build_atomvm(atomvm_path, chip, idf_path, clean) do
+         :ok <- build_atomvm(atomvm_path, chip, idf_path, use_docker, idf_version, clean) do
       build_dir = Path.join([atomvm_path, "src", "platforms", "esp32", "build"])
       atomvm_img = Path.join([build_dir, "atomvm-#{chip}.img"])
 
@@ -237,19 +250,38 @@ defmodule Mix.Tasks.Atomvm.Esp32.Build do
     end
   end
 
-  defp check_esp_idf(idf_path) do
-    case System.find_executable(idf_path) do
-      nil ->
-        {:error,
-         """
-         ESP-IDF not found. Please install and set up ESP-IDF:
+  defp check_esp_idf(idf_path, use_docker, idf_version) do
+    if use_docker do
+      case System.find_executable("docker") do
+        nil ->
+          {:error,
+           """
+           Docker not found. Please install Docker:
 
-         https://docs.espressif.com/projects/esp-idf/en/latest/esp32/get-started/
-         """}
+           https://docs.docker.com/get-docker/
+           """}
 
-      idf_path ->
-        IO.puts("Found ESP-IDF: #{idf_path}")
-        :ok
+        docker_path ->
+          IO.puts("Found Docker: #{docker_path}")
+          IO.puts("Using ESP-IDF Docker image: espressif/idf:#{idf_version}")
+          :ok
+      end
+    else
+      case System.find_executable(idf_path) do
+        nil ->
+          {:error,
+           """
+           ESP-IDF not found. Please install and set up ESP-IDF:
+
+           https://docs.espressif.com/projects/esp-idf/en/latest/esp32/get-started/
+
+           Or use --use-docker to build with Docker instead.
+           """}
+
+        idf_path_found ->
+          IO.puts("Found ESP-IDF: #{idf_path_found}")
+          :ok
+      end
     end
   end
 
@@ -301,7 +333,7 @@ defmodule Mix.Tasks.Atomvm.Esp32.Build do
     end
   end
 
-  defp build_atomvm(atomvm_path, chip, idf_path, clean) do
+  defp build_atomvm(atomvm_path, chip, idf_path, use_docker, idf_version, clean) do
     build_dir = Path.join([atomvm_path, "src", "platforms", "esp32", "build"])
     platform_dir = Path.join([atomvm_path, "src", "platforms", "esp32"])
 
@@ -314,34 +346,51 @@ defmodule Mix.Tasks.Atomvm.Esp32.Build do
 
     # Set target chip
     {_output, status} =
-      System.cmd(idf_path, ["set-target", chip],
-        cd: platform_dir,
-        stderr_to_stdout: true,
-        into: IO.stream(:stdio, :line)
-      )
+      if use_docker do
+        run_idf_docker(idf_version, atomvm_path, platform_dir, ["set-target", chip])
+      else
+        System.cmd(idf_path, ["set-target", chip],
+          cd: platform_dir,
+          stderr_to_stdout: true,
+          into: IO.stream(:stdio, :line)
+        )
+      end
 
     case status do
       0 ->
         IO.puts("Building AtomVM... (this may take several minutes)")
 
         {_output, status} =
-          System.cmd(idf_path, ["build"],
-            cd: platform_dir,
-            stderr_to_stdout: true,
-            into: IO.stream(:stdio, :line)
-          )
+          if use_docker do
+            run_idf_docker(idf_version, atomvm_path, platform_dir, ["build"])
+          else
+            System.cmd(idf_path, ["build"],
+              cd: platform_dir,
+              stderr_to_stdout: true,
+              into: IO.stream(:stdio, :line)
+            )
+          end
 
         case status do
           0 ->
-            IO.puts("Creating flashable image...")
+            # Use absolute paths to avoid issues with relative paths
+            abs_atomvm_path = Path.expand(atomvm_path)
+            abs_build_dir = Path.expand(build_dir)
+            mkimage_script = Path.join([abs_build_dir, "mkimage.sh"])
 
-            mkimage_script = Path.join([build_dir, "mkimage.sh"])
+            # Fix paths in mkimage.sh if built with Docker
+            if use_docker do
+              IO.puts("Fixing paths in mkimage.sh for host execution...")
+              fix_mkimage_paths(mkimage_script, abs_atomvm_path)
+            end
+
+            IO.puts("Creating flashable image...")
             # TODO: Remove --boot flag when AtomVM#1163 is merged
-            boot_avm = Path.join([atomvm_path, "build", "libs", "esp32boot", "elixir_esp32boot.avm"])
+            boot_avm = Path.join([abs_atomvm_path, "build", "libs", "esp32boot", "elixir_esp32boot.avm"])
 
             {_output, status} =
               System.cmd("sh", [mkimage_script, "--boot", boot_avm],
-                cd: build_dir,
+                cd: abs_build_dir,
                 stderr_to_stdout: true,
                 into: IO.stream(:stdio, :line)
               )
@@ -362,4 +411,63 @@ defmodule Mix.Tasks.Atomvm.Esp32.Build do
         {:error, "Failed to set target chip"}
     end
   end
+
+  defp fix_mkimage_paths(mkimage_script, atomvm_path) do
+    # Convert /project paths to actual host paths
+    # Files generated in Docker contain /project/ paths that need to be replaced
+    abs_atomvm_path = Path.expand(atomvm_path)
+    build_dir = Path.dirname(mkimage_script)
+
+    IO.puts("Fixing container paths in build files...")
+
+    # Find ALL files containing /project and fix them
+    # Use grep to find files, then sed to replace paths
+    {output, status} =
+      System.cmd(
+        "sh",
+        [
+          "-c",
+          "grep -rl '/project' #{build_dir} 2>/dev/null | xargs -r sed -i 's|/project|#{abs_atomvm_path}|g'"
+        ],
+        stderr_to_stdout: true
+      )
+
+    case status do
+      0 ->
+        IO.puts("Successfully fixed container paths")
+        :ok
+
+      1 ->
+        # Exit code 1 from grep means no matches found, which is fine
+        IO.puts("No container paths found to fix")
+        :ok
+
+      _ ->
+        IO.puts("Warning: Some files may not have been fixed: #{output}")
+        :ok
+    end
+  end
+
+  defp run_idf_docker(idf_version, atomvm_path, platform_dir, idf_args) do
+    # Calculate the relative path from atomvm_path to platform_dir
+    relative_dir = Path.relative_to(platform_dir, atomvm_path)
+
+    # Build docker command
+    docker_args = [
+      "run",
+      "--rm",
+      "-v",
+      "#{atomvm_path}:/project",
+      "-w",
+      "/project/#{relative_dir}",
+      "espressif/idf:#{idf_version}",
+      "idf.py"
+    ] ++ idf_args
+
+    System.cmd("docker", docker_args,
+      stderr_to_stdout: true,
+      into: IO.stream(:stdio, :line)
+    )
+  end
+
 end
