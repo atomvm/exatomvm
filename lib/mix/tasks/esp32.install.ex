@@ -1,22 +1,52 @@
 defmodule Mix.Tasks.Atomvm.Esp32.Install do
   @moduledoc """
-  Mix task for erasing flash and installing the latest AtomVM release to connected device.
+  Mix task for erasing flash and installing AtomVM to connected device.
 
-  Takes an optional --baud option to set the baud rate of the flashing.
-  Defaults to 921600, use 115200 for slower devices.
+  By default, downloads and installs the latest AtomVM release from GitHub.
+  Optionally, can install a custom-built image using the --image option.
+
+  **WARNING:** This task erases the current flash before installing.
+
+  ## Options
+
+    * `--image` - Path to custom AtomVM .img file (optional, downloads latest release if not provided)
+    * `--baud` - Baud rate for flashing (default: 921600, use 115200 for slower devices)
+
+  ## Examples
+
+      # Install latest release from GitHub (erases flash)
+      mix atomvm.esp32.install
+
+      # Install custom-built image (erases flash)
+      mix atomvm.esp32.install --image /path/to/AtomVM-esp32s3.img
+
+      # Install with custom baud rate
+      mix atomvm.esp32.install --baud 115200
 
   After install, your project can be flashed with:
       mix atomvm.esp32.flash
   """
   use Mix.Task
 
-  @shortdoc "Install latest AtomVM release on ESP32"
+  @shortdoc "Install AtomVM to ESP32 device"
 
   alias ExAtomVM.EsptoolHelper
 
   @impl Mix.Task
   def run(args) do
-    {opts, _} = OptionParser.parse!(args, strict: [baud: :string])
+    {opts, _} = OptionParser.parse!(args, strict: [image: :string, baud: :string])
+
+    case Keyword.get(opts, :image) do
+      nil ->
+        run_with_latest_release(opts)
+
+      image_path ->
+        run_with_custom_image(image_path, opts)
+    end
+  end
+
+  # Install latest release from GitHub
+  defp run_with_latest_release(opts) do
     baud = Keyword.get(opts, :baud, "921600")
 
     with :ok <- check_req_dependency(),
@@ -58,13 +88,51 @@ defmodule Mix.Tasks.Atomvm.Esp32.Install do
     end
   end
 
+  # Install custom-built image
+  defp run_with_custom_image(image_path, opts) do
+    baud = Keyword.get(opts, :baud, "921600")
+
+    if not File.exists?(image_path) do
+      IO.puts("Error: Image file not found: #{image_path}")
+      exit({:shutdown, 1})
+    end
+
+    with :ok <- EsptoolHelper.setup(),
+         selected_device <- EsptoolHelper.select_device(),
+         :ok <- confirm_erase_and_flash(selected_device, image_path),
+         true <-
+           EsptoolHelper.erase_flash([
+             "--port",
+             selected_device["port"],
+             "--chip",
+             "auto",
+             "--after",
+             "no-reset"
+           ]),
+         :timer.sleep(3000),
+         true <- flash_release(selected_device, image_path, baud) do
+      IO.puts("""
+
+        Successfully installed AtomVM on #{selected_device["chip_family_name"]} Port: #{selected_device["port"]} MAC: #{selected_device["mac_address"]}
+
+        Your project can be flashed with:
+          mix atomvm.esp32.flash
+
+      """)
+    else
+      {:error, reason} ->
+        IO.puts("Error: #{reason}")
+        exit({:shutdown, 1})
+    end
+  end
+
   defp confirm_erase_and_flash(selected_device, release_file) do
     confirmation =
       IO.gets("""
 
       Are you sure you want to erase the flash of
       #{selected_device["chip_family_name"]} - Port: #{selected_device["port"]} MAC: #{selected_device["mac_address"]}
-      And install AtomVM: #{release_file}
+      And install AtomVM: #{Path.basename(release_file)}
       ? [N/y]:
 
       """)
@@ -149,7 +217,9 @@ defmodule Mix.Tasks.Atomvm.Esp32.Install do
         "ESP32-S3" => "0x0",
         "ESP32-C2" => "0x0",
         "ESP32-C3" => "0x0",
+        "ESP32-C5" => "0x2000",
         "ESP32-C6" => "0x0",
+        "ESP32-C61" => "0x0",
         "ESP32-H2" => "0x0",
         "ESP32-P4" => "0x2000"
       }[device["chip_family_name"]] || "0x0"
