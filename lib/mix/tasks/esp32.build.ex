@@ -4,6 +4,20 @@ defmodule Mix.Tasks.Atomvm.Esp32.Build do
 
   Builds AtomVM from a local repository or git URL using ESP-IDF.
 
+  ## Requirements
+
+  **Without Docker:**
+    * CMake (3.13 or later)
+    * Ninja (preferred) or Make
+    * Erlang/OTP (27 or later)
+    * Elixir (1.18 or later)
+    * ESP-IDF (v5.4.1 recommended)
+    * Git
+
+  **With Docker (--use-docker flag):**
+    * Docker
+    * Git
+
   ## Options
 
     * `--atomvm-path` - Path to local AtomVM repository (optional, overrides URL if both provided)
@@ -299,9 +313,24 @@ defmodule Mix.Tasks.Atomvm.Esp32.Build do
       IO.puts("Building generic Unix tools and elixir_esp32boot (required for ESP32 build)...")
       File.mkdir_p!(build_dir)
 
+      # Check if ninja is available, fall back to make if not
+      {build_tool, cmake_generator} =
+        case System.find_executable("ninja") do
+          nil ->
+            IO.puts("Ninja not found, using Make as build system")
+            {"make", []}
+
+          _ninja_path ->
+            IO.puts("Using Ninja as build system")
+            {"ninja", ["-GNinja"]}
+        end
+
       # Run cmake
+      cmake_args =
+        [".."] ++ cmake_generator ++ ["-DCMAKE_BUILD_TYPE=Release", "-DAVM_BUILD_RUNTIME_ONLY=ON"]
+
       {_output, status} =
-        System.cmd("cmake", ["..", "-DCMAKE_BUILD_TYPE=Release", "-DAVM_BUILD_RUNTIME_ONLY=ON"],
+        System.cmd("cmake", cmake_args,
           cd: build_dir,
           stderr_to_stdout: true,
           into: IO.stream(:stdio, :line)
@@ -312,7 +341,7 @@ defmodule Mix.Tasks.Atomvm.Esp32.Build do
           IO.puts("Building tools and elixir_esp32boot...")
 
           {_output, status} =
-            System.cmd("make", ["PackBEAM", "elixir_esp32boot", "exavmlib", "atomvmlib"],
+            System.cmd(build_tool, ["PackBEAM", "elixir_esp32boot", "exavmlib", "atomvmlib"],
               cd: build_dir,
               stderr_to_stdout: true,
               into: IO.stream(:stdio, :line)
