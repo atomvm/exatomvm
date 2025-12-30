@@ -28,6 +28,7 @@ defmodule Mix.Tasks.Atomvm.Esp32.Build do
     * `--use-docker` - Use ESP-IDF Docker image instead of local installation
     * `--idf-version` - ESP-IDF version for Docker image (default: v5.4.1)
     * `--clean` - Clean build directory before building
+    * `--mbedtls-prefix` - Path to custom MbedTLS installation (optional, falls back to MBEDTLS_PREFIX env var)
 
   ## Examples
 
@@ -52,6 +53,9 @@ defmodule Mix.Tasks.Atomvm.Esp32.Build do
       # Build using Docker with specific IDF version
       mix atomvm.esp32.build --atomvm-path ./_build/atomvm_source/AtomVM/ --use-docker --idf-version v5.4.1 --chip esp32s3
 
+      # Build with custom MbedTLS
+      mix atomvm.esp32.build --atomvm-path /path/to/AtomVM --mbedtls-prefix /usr/local/opt/mbedtls@3
+
   """
   use Mix.Task
 
@@ -75,7 +79,8 @@ defmodule Mix.Tasks.Atomvm.Esp32.Build do
           idf_path: :string,
           use_docker: :boolean,
           idf_version: :string,
-          clean: :boolean
+          clean: :boolean,
+          mbedtls_prefix: :string
         ]
       )
 
@@ -87,6 +92,10 @@ defmodule Mix.Tasks.Atomvm.Esp32.Build do
     use_docker = Keyword.get(opts, :use_docker, false)
     idf_version = Keyword.get(opts, :idf_version, @default_idf_version)
     clean = Keyword.get(opts, :clean, false)
+
+    # Get mbedtls_prefix from option or environment variable
+    mbedtls_prefix =
+      Keyword.get(opts, :mbedtls_prefix) || System.get_env("MBEDTLS_PREFIX")
 
     # Use --atomvm-path, --atomvm-url, or default to AtomVM/AtomVM main branch
     atomvm_path =
@@ -114,7 +123,7 @@ defmodule Mix.Tasks.Atomvm.Esp32.Build do
     """)
 
     with :ok <- check_esp_idf(idf_path, use_docker, idf_version),
-         :ok <- build_generic_unix(atomvm_path),
+         :ok <- build_generic_unix(atomvm_path, mbedtls_prefix),
          :ok <- build_atomvm(atomvm_path, chip, idf_path, use_docker, idf_version, clean) do
       build_dir = Path.join([atomvm_path, "src", "platforms", "esp32", "build"])
       atomvm_img = Path.join([build_dir, "atomvm-#{chip}.img"])
@@ -299,7 +308,7 @@ defmodule Mix.Tasks.Atomvm.Esp32.Build do
     end
   end
 
-  defp build_generic_unix(atomvm_path) do
+  defp build_generic_unix(atomvm_path, mbedtls_prefix) do
     build_dir = Path.join(atomvm_path, "build")
 
     # Check if tools and esp32boot already exist
@@ -325,9 +334,20 @@ defmodule Mix.Tasks.Atomvm.Esp32.Build do
             {"ninja", ["-GNinja"]}
         end
 
-      # Run cmake
+      # Equivalent to: ${MBEDTLS_PREFIX:+-DCMAKE_PREFIX_PATH="$MBEDTLS_PREFIX"}
+      mbedtls_args =
+        if mbedtls_prefix do
+          IO.puts("Using custom MbedTLS from: #{mbedtls_prefix}")
+          ["-DCMAKE_PREFIX_PATH=#{mbedtls_prefix}"]
+        else
+          []
+        end
+
+      # Run cmake: cmake .. ${MBEDTLS_PREFIX:+...} -G Ninja -DCMAKE_BUILD_TYPE=Release -DAVM_BUILD_RUNTIME_ONLY=ON
       cmake_args =
-        [".."] ++ cmake_generator ++ ["-DCMAKE_BUILD_TYPE=Release", "-DAVM_BUILD_RUNTIME_ONLY=ON"]
+        [".."] ++
+          mbedtls_args ++
+          cmake_generator ++ ["-DCMAKE_BUILD_TYPE=Release", "-DAVM_BUILD_RUNTIME_ONLY=ON"]
 
       {_output, status} =
         System.cmd("cmake", cmake_args,
