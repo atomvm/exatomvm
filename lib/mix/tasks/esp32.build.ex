@@ -124,6 +124,7 @@ defmodule Mix.Tasks.Atomvm.Esp32.Build do
 
     with :ok <- check_esp_idf(idf_path, use_docker, idf_version),
          :ok <- build_generic_unix(atomvm_path, mbedtls_prefix),
+         :ok <- copy_avm_libraries(atomvm_path),
          :ok <- build_atomvm(atomvm_path, chip, idf_path, use_docker, idf_version, clean) do
       build_dir = Path.join([atomvm_path, "src", "platforms", "esp32", "build"])
       atomvm_img = Path.join([build_dir, "atomvm-#{chip}.img"])
@@ -382,6 +383,72 @@ defmodule Mix.Tasks.Atomvm.Esp32.Build do
     end
   end
 
+  defp configure_elixir_partitions(platform_dir) do
+    # Per AtomVM docs: Add partition config to sdkconfig.defaults before building
+    sdkconfig_defaults = platform_dir |> Path.join("sdkconfig.defaults")
+
+    IO.puts("Configuring Elixir partition table (partitions-elixir.csv)...")
+
+    # Read existing defaults or create empty
+    content =
+      if File.exists?(sdkconfig_defaults) do
+        File.read!(sdkconfig_defaults)
+      else
+        ""
+      end
+
+    # Check if partition config already exists
+    if not String.contains?(content, "CONFIG_PARTITION_TABLE_CUSTOM_FILENAME") do
+      # Append Elixir partition configuration
+      new_content = content <> "\nCONFIG_PARTITION_TABLE_CUSTOM_FILENAME=\"partitions-elixir.csv\"\n"
+      File.write!(sdkconfig_defaults, new_content)
+      IO.puts("✓ Added partitions-elixir.csv to sdkconfig.defaults")
+    else
+      # Replace existing config
+      new_content =
+        content
+        |> String.replace(
+          ~r/CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="[^"]+"/,
+          ~s(CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions-elixir.csv")
+        )
+
+      File.write!(sdkconfig_defaults, new_content)
+      IO.puts("✓ Updated sdkconfig.defaults to use partitions-elixir.csv")
+    end
+  end
+
+  defp copy_avm_libraries(atomvm_path) do
+    avm_deps_dir = File.cwd!() |> Path.join("avm_deps")
+
+    if File.dir?(avm_deps_dir) do
+      IO.puts("Removing existing avm_deps folder...")
+      File.rm_rf!(avm_deps_dir)
+    end
+
+    IO.puts("Creating avm_deps folder and copying libraries...")
+    File.mkdir_p!(avm_deps_dir)
+
+    build_libs_dir = atomvm_path |> Path.join("build") |> Path.join("libs")
+    avm_files = build_libs_dir |> Path.join("**/*.avm") |> Path.wildcard()
+
+    # Copy each file
+    case avm_files do
+      [] ->
+        IO.puts("Warning: No .avm files found in #{build_libs_dir}")
+        :ok
+
+      files ->
+        Enum.each(files, fn src_path ->
+          dest_path = src_path |> Path.basename() |> then(&Path.join(avm_deps_dir, &1))
+          File.cp!(src_path, dest_path)
+          IO.puts("  Copied #{Path.basename(src_path)}")
+        end)
+
+        IO.puts("✓ Copied #{length(files)} AVM libraries to #{avm_deps_dir}")
+        :ok
+    end
+  end
+
   defp build_atomvm(atomvm_path, chip, idf_path, use_docker, idf_version, clean) do
     build_dir = Path.join([atomvm_path, "src", "platforms", "esp32", "build"])
     platform_dir = Path.join([atomvm_path, "src", "platforms", "esp32"])
@@ -392,6 +459,9 @@ defmodule Mix.Tasks.Atomvm.Esp32.Build do
     end
 
     IO.puts("Configuring build for #{chip}...")
+
+    # Configure Elixir partition table in sdkconfig.defaults BEFORE set-target
+    configure_elixir_partitions(platform_dir)
 
     # Set target chip
     {_output, status} =
@@ -407,20 +477,40 @@ defmodule Mix.Tasks.Atomvm.Esp32.Build do
 
     case status do
       0 ->
-        IO.puts("Building AtomVM with Elixir partitions... (this may take several minutes)")
-
-        # Use Elixir partition table (512KB boot partition for elixir_esp32boot.avm)
-        partition_config = "-DCONFIG_PARTITION_TABLE_CUSTOM_FILENAME=\"partitions-elixir.csv\""
+        # Reconfigure to ensure partition table settings are applied
+        IO.puts("Reconfiguring to apply Elixir partitions...")
 
         {_output, status} =
           if use_docker do
-            run_idf_docker(idf_version, atomvm_path, platform_dir, [partition_config, "build"])
+            run_idf_docker(idf_version, atomvm_path, platform_dir, ["reconfigure"])
           else
-            System.cmd(idf_path, [partition_config, "build"],
+            System.cmd(idf_path, ["reconfigure"],
               cd: platform_dir,
               stderr_to_stdout: true,
               into: IO.stream(:stdio, :line)
             )
+          end
+
+        status =
+          case status do
+            0 ->
+              IO.puts("Building AtomVM... (this may take several minutes)")
+
+              {_output, build_status} =
+                if use_docker do
+                  run_idf_docker(idf_version, atomvm_path, platform_dir, ["build"])
+                else
+                  System.cmd(idf_path, ["build"],
+                    cd: platform_dir,
+                    stderr_to_stdout: true,
+                    into: IO.stream(:stdio, :line)
+                  )
+                end
+
+              build_status
+
+            _ ->
+              status
           end
 
         case status do
