@@ -290,13 +290,13 @@ defmodule Mix.Tasks.Atomvm.Esp32.Build do
 
     # Check if tools and esp32boot already exist
     packbeam_path = Path.join([build_dir, "tools", "packbeam", "PackBEAM"])
-    esp32boot_path = Path.join([build_dir, "libs", "esp32boot", "esp32boot.avm"])
+    esp32boot_path = Path.join([build_dir, "libs", "esp32boot", "elixir_esp32boot.avm"])
 
     if File.exists?(packbeam_path) and File.exists?(esp32boot_path) do
-      IO.puts("Generic Unix build tools and esp32boot already exist, skipping...")
+      IO.puts("Generic Unix build tools and elixir_esp32boot already exist, skipping...")
       :ok
     else
-      IO.puts("Building generic Unix tools and esp32boot (required for ESP32 build)...")
+      IO.puts("Building generic Unix tools and elixir_esp32boot (required for ESP32 build)...")
       File.mkdir_p!(build_dir)
 
       # Run cmake
@@ -309,10 +309,10 @@ defmodule Mix.Tasks.Atomvm.Esp32.Build do
 
       case status do
         0 ->
-          IO.puts("Building tools and esp32boot...")
+          IO.puts("Building tools and elixir_esp32boot...")
 
           {_output, status} =
-            System.cmd("make", ["PackBEAM", "esp32boot", "elixir_esp32boot", "exavmlib", "atomvmlib"],
+            System.cmd("make", ["PackBEAM", "elixir_esp32boot", "exavmlib", "atomvmlib"],
               cd: build_dir,
               stderr_to_stdout: true,
               into: IO.stream(:stdio, :line)
@@ -320,7 +320,7 @@ defmodule Mix.Tasks.Atomvm.Esp32.Build do
 
           case status do
             0 ->
-              IO.puts("Generic Unix tools and esp32boot built successfully")
+              IO.puts("Generic Unix tools and elixir_esp32boot built successfully")
               :ok
 
             _ ->
@@ -358,6 +358,9 @@ defmodule Mix.Tasks.Atomvm.Esp32.Build do
 
     case status do
       0 ->
+        # Configure to use Elixir partition table (larger boot partition for elixir_esp32boot.avm)
+        configure_elixir_partitions(platform_dir)
+
         IO.puts("Building AtomVM... (this may take several minutes)")
 
         {_output, status} =
