@@ -138,7 +138,7 @@ defmodule Mix.Tasks.Atomvm.Esp32.Build do
         Flashable image: #{atomvm_img}
 
         To flash to your device, run:
-          mix atomvm.esp32.build.flash --image #{atomvm_img}
+          mix atomvm.esp32.install --image #{atomvm_img}
 
         Or use idf.py:
           cd #{Path.dirname(build_dir)}
@@ -407,13 +407,16 @@ defmodule Mix.Tasks.Atomvm.Esp32.Build do
 
     case status do
       0 ->
-        IO.puts("Building AtomVM... (this may take several minutes)")
+        IO.puts("Building AtomVM with Elixir partitions... (this may take several minutes)")
+
+        # Use Elixir partition table (512KB boot partition for elixir_esp32boot.avm)
+        partition_config = "-DCONFIG_PARTITION_TABLE_CUSTOM_FILENAME=\"partitions-elixir.csv\""
 
         {_output, status} =
           if use_docker do
-            run_idf_docker(idf_version, atomvm_path, platform_dir, ["build"])
+            run_idf_docker(idf_version, atomvm_path, platform_dir, [partition_config, "build"])
           else
-            System.cmd(idf_path, ["build"],
+            System.cmd(idf_path, [partition_config, "build"],
               cd: platform_dir,
               stderr_to_stdout: true,
               into: IO.stream(:stdio, :line)
