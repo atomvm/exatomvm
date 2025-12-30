@@ -407,9 +407,6 @@ defmodule Mix.Tasks.Atomvm.Esp32.Build do
 
     case status do
       0 ->
-        # Configure to use Elixir partition table (larger boot partition for elixir_esp32boot.avm)
-        configure_elixir_partitions(platform_dir)
-
         IO.puts("Building AtomVM... (this may take several minutes)")
 
         {_output, status} =
