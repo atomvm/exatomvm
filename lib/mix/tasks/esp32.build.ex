@@ -520,12 +520,6 @@ defmodule Mix.Tasks.Atomvm.Esp32.Build do
             abs_build_dir = Path.expand(build_dir)
             mkimage_script = Path.join([abs_build_dir, "mkimage.sh"])
 
-            # Fix paths in mkimage.sh if built with Docker
-            if use_docker do
-              IO.puts("Fixing paths in mkimage.sh for host execution...")
-              fix_mkimage_paths(mkimage_script, abs_atomvm_path)
-            end
-
             IO.puts("Creating flashable image...")
             # TODO: Remove --boot flag when AtomVM#1163 is merged
             boot_avm = Path.join([abs_atomvm_path, "build", "libs", "esp32boot", "elixir_esp32boot.avm"])
@@ -551,42 +545,6 @@ defmodule Mix.Tasks.Atomvm.Esp32.Build do
 
       _ ->
         {:error, "Failed to set target chip"}
-    end
-  end
-
-  defp fix_mkimage_paths(mkimage_script, atomvm_path) do
-    # Convert /project paths to actual host paths
-    # Files generated in Docker contain /project/ paths that need to be replaced
-    abs_atomvm_path = Path.expand(atomvm_path)
-    build_dir = Path.dirname(mkimage_script)
-
-    IO.puts("Fixing container paths in build files...")
-
-    # Find ALL files containing /project and fix them
-    # Use grep to find files, then sed to replace paths
-    {output, status} =
-      System.cmd(
-        "sh",
-        [
-          "-c",
-          "grep -rl '/project' #{build_dir} 2>/dev/null | xargs -r sed -i 's|/project|#{abs_atomvm_path}|g'"
-        ],
-        stderr_to_stdout: true
-      )
-
-    case status do
-      0 ->
-        IO.puts("Successfully fixed container paths")
-        :ok
-
-      1 ->
-        # Exit code 1 from grep means no matches found, which is fine
-        IO.puts("No container paths found to fix")
-        :ok
-
-      _ ->
-        IO.puts("Warning: Some files may not have been fixed: #{output}")
-        :ok
     end
   end
 
