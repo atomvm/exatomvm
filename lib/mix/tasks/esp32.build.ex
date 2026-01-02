@@ -6,17 +6,20 @@ defmodule Mix.Tasks.Atomvm.Esp32.Build do
 
   ## Requirements
 
+  **General requirements**
+    * Erlang/OTP (27 or later)
+    * Elixir (1.18 or later)
+    * Git
+
   **Without Docker:**
     * CMake (3.13 or later)
     * Ninja (preferred) or Make
-    * Erlang/OTP (27 or later)
-    * Elixir (1.18 or later)
     * ESP-IDF (v5.4.1 recommended)
-    * Git
 
   **With Docker (--use-docker flag):**
     * Docker
-    * Git
+    * Note: Docker build support requires AtomVM main branch from Jan 2, 2026 or later (PR #2052).
+      Previous AtomVM versions must be built with the local ESP-IDF toolchain installed.
 
   ## Options
 
@@ -123,9 +126,22 @@ defmodule Mix.Tasks.Atomvm.Esp32.Build do
     """)
 
     with :ok <- check_esp_idf(idf_path, use_docker, idf_version),
-         :ok <- build_generic_unix(atomvm_path, mbedtls_prefix),
+         :ok <-
+           build_generic_unix(
+             atomvm_path: atomvm_path,
+             mbedtls_prefix: mbedtls_prefix,
+             clean: clean
+           ),
          :ok <- copy_avm_libraries(atomvm_path),
-         :ok <- build_atomvm(atomvm_path, chip, idf_path, use_docker, idf_version, clean) do
+         :ok <-
+           build_atomvm(
+             atomvm_path: atomvm_path,
+             chip: chip,
+             idf_path: idf_path,
+             use_docker: use_docker,
+             idf_version: idf_version,
+             clean: clean
+           ) do
       build_dir = Path.join([atomvm_path, "src", "platforms", "esp32", "build"])
       atomvm_img = Path.join([build_dir, "atomvm-#{chip}.img"])
 
@@ -309,8 +325,18 @@ defmodule Mix.Tasks.Atomvm.Esp32.Build do
     end
   end
 
-  defp build_generic_unix(atomvm_path, mbedtls_prefix) do
+  defp build_generic_unix(opts) do
+    atomvm_path = Keyword.fetch!(opts, :atomvm_path)
+    mbedtls_prefix = Keyword.get(opts, :mbedtls_prefix)
+    clean = Keyword.get(opts, :clean, false)
+
     build_dir = Path.join(atomvm_path, "build")
+
+    # Clean build directory if requested
+    if clean and File.dir?(build_dir) do
+      IO.puts("Cleaning generic Unix build directory...")
+      File.rm_rf!(build_dir)
+    end
 
     # Check if tools and esp32boot already exist
     packbeam_path = Path.join([build_dir, "tools", "packbeam", "PackBEAM"])
@@ -400,7 +426,9 @@ defmodule Mix.Tasks.Atomvm.Esp32.Build do
     # Check if partition config already exists
     if not String.contains?(content, "CONFIG_PARTITION_TABLE_CUSTOM_FILENAME") do
       # Append Elixir partition configuration
-      new_content = content <> "\nCONFIG_PARTITION_TABLE_CUSTOM_FILENAME=\"partitions-elixir.csv\"\n"
+      new_content =
+        content <> "\nCONFIG_PARTITION_TABLE_CUSTOM_FILENAME=\"partitions-elixir.csv\"\n"
+
       File.write!(sdkconfig_defaults, new_content)
       IO.puts("✓ Added partitions-elixir.csv to sdkconfig.defaults")
     else
@@ -449,7 +477,14 @@ defmodule Mix.Tasks.Atomvm.Esp32.Build do
     end
   end
 
-  defp build_atomvm(atomvm_path, chip, idf_path, use_docker, idf_version, clean) do
+  defp build_atomvm(opts) do
+    atomvm_path = Keyword.fetch!(opts, :atomvm_path)
+    chip = Keyword.fetch!(opts, :chip)
+    idf_path = Keyword.fetch!(opts, :idf_path)
+    use_docker = Keyword.get(opts, :use_docker, false)
+    idf_version = Keyword.fetch!(opts, :idf_version)
+    clean = Keyword.get(opts, :clean, false)
+
     build_dir = Path.join([atomvm_path, "src", "platforms", "esp32", "build"])
     platform_dir = Path.join([atomvm_path, "src", "platforms", "esp32"])
 
@@ -522,7 +557,8 @@ defmodule Mix.Tasks.Atomvm.Esp32.Build do
 
             IO.puts("Creating flashable image...")
             # TODO: Remove --boot flag when AtomVM#1163 is merged
-            boot_avm = Path.join([abs_atomvm_path, "build", "libs", "esp32boot", "elixir_esp32boot.avm"])
+            boot_avm =
+              Path.join([abs_atomvm_path, "build", "libs", "esp32boot", "elixir_esp32boot.avm"])
 
             {_output, status} =
               System.cmd("sh", [mkimage_script, "--boot", boot_avm],
@@ -553,21 +589,21 @@ defmodule Mix.Tasks.Atomvm.Esp32.Build do
     relative_dir = Path.relative_to(platform_dir, atomvm_path)
 
     # Build docker command
-    docker_args = [
-      "run",
-      "--rm",
-      "-v",
-      "#{atomvm_path}:/project",
-      "-w",
-      "/project/#{relative_dir}",
-      "espressif/idf:#{idf_version}",
-      "idf.py"
-    ] ++ idf_args
+    docker_args =
+      [
+        "run",
+        "--rm",
+        "-v",
+        "#{atomvm_path}:/project",
+        "-w",
+        "/project/#{relative_dir}",
+        "espressif/idf:#{idf_version}",
+        "idf.py"
+      ] ++ idf_args
 
     System.cmd("docker", docker_args,
       stderr_to_stdout: true,
       into: IO.stream(:stdio, :line)
     )
   end
-
 end
