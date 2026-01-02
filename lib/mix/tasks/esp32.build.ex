@@ -18,7 +18,7 @@ defmodule Mix.Tasks.Atomvm.Esp32.Build do
 
   **With Docker (--use-docker flag):**
     * Docker
-    * Note: Docker build support requires AtomVM main branch from Jan 2, 2026 or later (PR #2052).
+    * Note: Docker build support requires AtomVM main branch from Jan 2, 2026 or later (https://github.com/atomvm/AtomVM/commit/2a4f0d0fe100ef6d440bef86eabfd08c5b290f6c).
       Previous AtomVM versions must be built with the local ESP-IDF toolchain installed.
 
   ## Options
