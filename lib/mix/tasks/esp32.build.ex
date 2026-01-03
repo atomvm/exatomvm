@@ -14,7 +14,7 @@ defmodule Mix.Tasks.Atomvm.Esp32.Build do
   **Without Docker:**
     * CMake (3.13 or later)
     * Ninja (preferred) or Make
-    * ESP-IDF (v5.4.1 recommended)
+    * ESP-IDF (v5.5.2 recommended)
 
   **With Docker (--use-docker flag):**
     * Docker
@@ -29,7 +29,7 @@ defmodule Mix.Tasks.Atomvm.Esp32.Build do
     * `--chip` - Target chip (default: esp32, options: esp32, esp32s2, esp32s3, esp32c2, esp32c3, esp32c6, esp32h2, esp32p4)
     * `--idf-path` - Path to idf.py executable (default: idf.py)
     * `--use-docker` - Use ESP-IDF Docker image instead of local installation
-    * `--idf-version` - ESP-IDF version for Docker image (default: v5.4.1)
+    * `--idf-version` - ESP-IDF version for Docker image (default: v5.5.2)
     * `--clean` - Clean build directory before building
     * `--mbedtls-prefix` - Path to custom MbedTLS installation (optional, falls back to MBEDTLS_PREFIX env var)
 
@@ -54,7 +54,7 @@ defmodule Mix.Tasks.Atomvm.Esp32.Build do
       mix atomvm.esp32.build --atomvm-path ./_build/atomvm_source/AtomVM/ --use-docker --chip esp32s3
 
       # Build using Docker with specific IDF version
-      mix atomvm.esp32.build --atomvm-path ./_build/atomvm_source/AtomVM/ --use-docker --idf-version v5.4.1 --chip esp32s3
+      mix atomvm.esp32.build --atomvm-path ./_build/atomvm_source/AtomVM/ --use-docker --idf-version v5.5.2 --chip esp32s3
 
       # Build with custom MbedTLS
       mix atomvm.esp32.build --atomvm-path /path/to/AtomVM --mbedtls-prefix /usr/local/opt/mbedtls@3
@@ -68,7 +68,7 @@ defmodule Mix.Tasks.Atomvm.Esp32.Build do
   @default_ref "main"
   @default_atomvm_url "https://github.com/atomvm/AtomVM"
   @default_idf_path "idf.py"
-  @default_idf_version "v5.4.1"
+  @default_idf_version "v5.5.2"
 
   @impl Mix.Task
   def run(args) do
@@ -126,22 +126,9 @@ defmodule Mix.Tasks.Atomvm.Esp32.Build do
     """)
 
     with :ok <- check_esp_idf(idf_path, use_docker, idf_version),
-         :ok <-
-           build_generic_unix(
-             atomvm_path: atomvm_path,
-             mbedtls_prefix: mbedtls_prefix,
-             clean: clean
-           ),
+         :ok <- build_generic_unix(atomvm_path, mbedtls_prefix, clean),
          :ok <- copy_avm_libraries(atomvm_path),
-         :ok <-
-           build_atomvm(
-             atomvm_path: atomvm_path,
-             chip: chip,
-             idf_path: idf_path,
-             use_docker: use_docker,
-             idf_version: idf_version,
-             clean: clean
-           ) do
+         :ok <- build_atomvm(atomvm_path, chip, idf_path, idf_version, use_docker, clean) do
       build_dir = Path.join([atomvm_path, "src", "platforms", "esp32", "build"])
       atomvm_img = Path.join([build_dir, "atomvm-#{chip}.img"])
 
@@ -325,10 +312,7 @@ defmodule Mix.Tasks.Atomvm.Esp32.Build do
     end
   end
 
-  defp build_generic_unix(opts) do
-    atomvm_path = Keyword.fetch!(opts, :atomvm_path)
-    mbedtls_prefix = Keyword.get(opts, :mbedtls_prefix)
-    clean = Keyword.get(opts, :clean, false)
+  defp build_generic_unix(atomvm_path, mbedtls_prefix, clean) do
 
     build_dir = Path.join(atomvm_path, "build")
 
@@ -477,13 +461,7 @@ defmodule Mix.Tasks.Atomvm.Esp32.Build do
     end
   end
 
-  defp build_atomvm(opts) do
-    atomvm_path = Keyword.fetch!(opts, :atomvm_path)
-    chip = Keyword.fetch!(opts, :chip)
-    idf_path = Keyword.fetch!(opts, :idf_path)
-    use_docker = Keyword.get(opts, :use_docker, false)
-    idf_version = Keyword.fetch!(opts, :idf_version)
-    clean = Keyword.get(opts, :clean, false)
+  defp build_atomvm(atomvm_path, chip, idf_path, idf_version, use_docker, clean) do
 
     build_dir = Path.join([atomvm_path, "src", "platforms", "esp32", "build"])
     platform_dir = Path.join([atomvm_path, "src", "platforms", "esp32"])
