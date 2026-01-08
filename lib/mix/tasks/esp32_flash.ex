@@ -141,7 +141,14 @@ defmodule Mix.Tasks.Atomvm.Esp32.Flash do
       _ ->
         IO.puts("Flashing using esptool..")
         tool_full_path = get_esptool_path(idf_path)
-        System.cmd(tool_full_path, tool_args, stderr_to_stdout: true, into: IO.stream(:stdio, 1))
+        {tool_exec, prefix_args} = resolve_esptool_exec(tool_full_path, idf_path)
+
+        System.cmd(
+          tool_exec,
+          prefix_args ++ tool_args,
+          stderr_to_stdout: true,
+          into: IO.stream(:stdio, 1)
+        )
     end
   end
 
@@ -151,6 +158,33 @@ defmodule Mix.Tasks.Atomvm.Esp32.Flash do
 
   defp get_esptool_path(idf_path) do
     "#{idf_path}#{@esp_tool_path}"
+  end
+
+  defp resolve_esptool_exec(tool_full_path, <<"">>) do
+    # IDF_PATH is not set: run esptool from PATH (usually "esptool.py").
+    {tool_full_path, []}
+  end
+
+  defp resolve_esptool_exec(tool_full_path, _idf_path) do
+    # IDF_PATH is set: tool_full_path is ESP-IDF's esptool.py.
+    # Some ESP-IDF installs ship it without the executable bit, so run it via python.
+    if not File.exists?(tool_full_path) do
+      Mix.raise("""
+      IDF_PATH is set, but esptool.py was not found: #{tool_full_path}
+      Try: env -u IDF_PATH mix atomvm.esp32.flash ...  (or install esptool)
+      """)
+    end
+
+    python = System.find_executable("python") || System.find_executable("python3")
+
+    if is_nil(python) do
+      Mix.raise("""
+      IDF_PATH is set, but python is missing from PATH
+      Try: env -u IDF_PATH mix atomvm.esp32.flash ...  (or install python3)
+      """)
+    end
+
+    {python, [tool_full_path]}
   end
 
   defp parse_args(args) do
