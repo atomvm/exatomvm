@@ -13,9 +13,12 @@ defmodule Mix.Tasks.Atomvm.Check do
   """
 
   alias Mix.Project
+  alias Mix.Tasks.Atomvm.MacroTracer
 
   def run(args) do
+    MacroTracer.start()
     Mix.Tasks.Compile.run(args)
+    MacroTracer.stop()
 
     beams_path = Project.compile_path()
 
@@ -203,6 +206,9 @@ defmodule Mix.Tasks.Atomvm.Check do
       IO.puts("Warning: following modules or functions are not available on AtomVM:")
       print_list_with_sources(missing)
       IO.puts("")
+
+      MacroTracer.report_macro_sources(missing)
+
       IO.puts("(Using them may not be supported; make sure ExAtomVM is fully updated.)")
       IO.puts("")
 
