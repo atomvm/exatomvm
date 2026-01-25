@@ -43,15 +43,28 @@ defmodule Mix.Tasks.Atomvm.MacroTracer do
   def trace({:remote_function, _meta, module, name, arity}, _env) do
     call = "#{Atom.to_string(module)}:#{name}/#{arity}"
 
-    case Process.get(:macro_stack, []) do
-      [] -> :ok
-      [macro_info | _] -> :ets.insert(__MODULE__, {call, macro_info})
+    case find_relevant_macro(Process.get(:macro_stack, [])) do
+      nil -> :ok
+      macro_info -> :ets.insert(__MODULE__, {call, macro_info})
     end
 
     :ok
   end
 
   def trace(_event, _env), do: :ok
+
+  # Skip standard Kernel/Elixir macros to find the actual dependency macro
+  @skip_modules [Kernel, Kernel.SpecialForms, Module, Code]
+
+  defp find_relevant_macro([]), do: nil
+
+  defp find_relevant_macro([{module, _name, _arity} = macro_info | rest]) do
+    if module in @skip_modules do
+      find_relevant_macro(rest)
+    else
+      macro_info
+    end
+  end
 
   defp save_manifest do
     if :ets.whereis(__MODULE__) != :undefined do
