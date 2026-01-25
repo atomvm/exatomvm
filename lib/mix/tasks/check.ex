@@ -86,25 +86,25 @@ defmodule Mix.Tasks.Atomvm.Check do
     |> Enum.into(MapSet.new())
   end
 
-  defp extract_ext_calls({:beam_file, module_name, _, _, _, code}) do
+  defp extract_ext_calls({:beam_file, module_name, _, _, _, code}, source_file) do
     ext_calls =
-      scan_instructions(code, fn
-        {:call_ext, _, {:extfunc, module, extfunc, arity}}, acc ->
-          [{module, extfunc, arity} | acc]
+      scan_instructions_with_location(code, module_name, fn
+        {:call_ext, _, {:extfunc, module, extfunc, arity}}, {caller_mod, caller_func, caller_arity}, acc ->
+          [{module, extfunc, arity, caller_mod, caller_func, caller_arity, source_file} | acc]
 
-        {:call_ext_last, _, {:extfunc, module, extfunc, arity}}, acc ->
-          [{module, extfunc, arity} | acc]
+        {:call_ext_last, _, {:extfunc, module, extfunc, arity}}, {caller_mod, caller_func, caller_arity}, acc ->
+          [{module, extfunc, arity, caller_mod, caller_func, caller_arity, source_file} | acc]
 
-        {:call_ext_only, _, {:extfunc, module, extfunc, arity}}, acc ->
-          [{module, extfunc, arity} | acc]
+        {:call_ext_only, _, {:extfunc, module, extfunc, arity}}, {caller_mod, caller_func, caller_arity}, acc ->
+          [{module, extfunc, arity, caller_mod, caller_func, caller_arity, source_file} | acc]
 
-        {:bif, func, _, args, _}, acc ->
-          [{:erlang, func, length(args)} | acc]
+        {:bif, func, _, args, _}, {caller_mod, caller_func, caller_arity}, acc ->
+          [{:erlang, func, length(args), caller_mod, caller_func, caller_arity, source_file} | acc]
 
-        {:gc_bif, func, _, _, args, _}, acc ->
-          [{:erlang, func, length(args)} | acc]
+        {:gc_bif, func, _, _, args, _}, {caller_mod, caller_func, caller_arity}, acc ->
+          [{:erlang, func, length(args), caller_mod, caller_func, caller_arity, source_file} | acc]
 
-        _, acc ->
+        _, _location, acc ->
           acc
       end)
 
@@ -147,28 +147,39 @@ defmodule Mix.Tasks.Atomvm.Check do
   defp extract_calls(path) do
     files = list_beam_files(path)
 
-    calls_by_mod =
-      Enum.reduce(files, %{}, fn filename, acc ->
-        file_path = Path.join(path, filename)
+    Enum.reduce(files, %{}, fn filename, acc ->
+      file_path = Path.join(path, filename)
+      beam_binary = File.read!(file_path)
+      source_file = get_source_file(file_path, beam_binary)
 
-        {module_name, ext_calls} =
-          File.read!(file_path)
-          |> :beam_disasm.file()
-          |> extract_ext_calls()
+      {_module_name, ext_calls} =
+        beam_binary
+        |> :beam_disasm.file()
+        |> extract_ext_calls(source_file)
 
-        Map.put(acc, module_name, ext_calls)
+      Enum.reduce(ext_calls, acc, fn {m, f, a, _caller_mod, caller_func, caller_arity, src}, inner_acc ->
+        call_string = "#{Atom.to_string(m)}:#{Atom.to_string(f)}/#{a}"
+        location = "#{src} (#{caller_func}/#{caller_arity})"
+        Map.update(inner_acc, call_string, [location], fn sources -> [location | sources] end)
       end)
+    end)
+  end
 
-    calls_by_mod
-    |> Map.values()
-    |> List.flatten()
-    |> Enum.uniq()
-    |> Enum.map(fn {m, f, a} -> "#{Atom.to_string(m)}:#{Atom.to_string(f)}/#{a}" end)
-    |> Enum.into(MapSet.new())
+  defp get_source_file(beam_path, beam_binary) do
+    case :beam_lib.chunks(beam_binary, [:compile_info]) do
+      {:ok, {_, [{:compile_info, info}]}} ->
+        case Keyword.get(info, :source) do
+          nil -> beam_path
+          source -> List.to_string(source)
+        end
+
+      _ ->
+        beam_path
+    end
   end
 
   defp check_ext_calls(beams_path) do
-    calls_set = extract_calls(beams_path)
+    calls_map = extract_calls(beams_path)
     runtime_deps_beams = Mix.Tasks.Atomvm.Packbeam.runtime_deps_beams()
 
     exported_calls_set =
@@ -181,11 +192,13 @@ defmodule Mix.Tasks.Atomvm.Check do
       |> Enum.into(MapSet.new())
       |> MapSet.union(exported_calls_set)
 
-    missing = MapSet.difference(calls_set, avail_funcs)
+    missing =
+      calls_map
+      |> Map.filter(fn {call, _sources} -> not MapSet.member?(avail_funcs, call) end)
 
-    if MapSet.size(missing) != 0 do
+    if map_size(missing) != 0 do
       IO.puts("Warning: following modules or functions are not available on AtomVM:")
-      print_list(missing)
+      print_list_with_sources(missing)
       IO.puts("")
       IO.puts("(Using them may not be supported; make sure ExAtomVM is fully updated.)")
       IO.puts("")
@@ -237,6 +250,17 @@ defmodule Mix.Tasks.Atomvm.Check do
     |> IO.puts()
   end
 
+  defp print_list_with_sources(map) do
+    map
+    |> Enum.sort_by(fn {call, _sources} -> call end)
+    |> Enum.map(fn {call, sources} ->
+      unique_sources = sources |> Enum.uniq() |> Enum.sort() |> Enum.join(", ")
+      "* #{call}\n    in: #{unique_sources}"
+    end)
+    |> Enum.join("\n")
+    |> IO.puts()
+  end
+
   defp list_beam_files(path) do
     path
     |> File.ls!()
@@ -249,5 +273,12 @@ defmodule Mix.Tasks.Atomvm.Check do
     end)
     |> List.flatten()
     |> Enum.uniq()
+  end
+
+  defp scan_instructions_with_location(code, module_name, fun) do
+    Enum.flat_map(code, fn {:function, func_name, arity, _, func_code} ->
+      location = {module_name, func_name, arity}
+      Enum.reduce(func_code, [], fn instr, acc -> fun.(instr, location, acc) end)
+    end)
   end
 end
