@@ -166,16 +166,19 @@ defmodule Mix.Tasks.Atomvm.Check do
   end
 
   defp get_source_file(beam_path, beam_binary) do
-    case :beam_lib.chunks(beam_binary, [:compile_info]) do
-      {:ok, {_, [{:compile_info, info}]}} ->
-        case Keyword.get(info, :source) do
-          nil -> beam_path
-          source -> List.to_string(source)
-        end
+    source =
+      case :beam_lib.chunks(beam_binary, [:compile_info]) do
+        {:ok, {_, [{:compile_info, info}]}} ->
+          case Keyword.get(info, :source) do
+            nil -> beam_path
+            source -> List.to_string(source)
+          end
 
-      _ ->
-        beam_path
-    end
+        _ ->
+          beam_path
+      end
+
+    Path.relative_to_cwd(source)
   end
 
   defp check_ext_calls(beams_path) do
