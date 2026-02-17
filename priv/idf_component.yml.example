@@ -1,0 +1,59 @@
+# IDF component manifest for AtomVM on ESP32.
+#
+# To use this file:
+#   1. Uncomment the dependencies you need below.
+#   2. Rename it:  mv idf_component.yml.example idf_component.yml
+#   3. Rebuild:    mix atomvm.esp32.build ...
+#
+# Note: At least one dependency must be uncommented before renaming,
+# otherwise the empty `dependencies:` key will cause a build error.
+# comment the `dependencies:` for no dependencies
+#
+# This file is copied into the AtomVM source tree at:
+#   <atomvm_path>/src/platforms/esp32/main/idf_component.yml
+#
+# Relative `path:` entries are resolved from that location.
+#
+#   Without Docker:
+#     Paths are relative to <atomvm_path>/src/platforms/esp32/main/
+#     e.g. path: ../../../../../my_nif
+#     navigates up from main/ -> esp32/ -> platforms/ -> src/ -> AtomVM/ -> parent
+#
+#   With Docker (--use-docker):
+#     Only the AtomVM repository is mounted in the container.
+#     Local path dependencies outside the AtomVM tree are NOT accessible.
+#
+# Read more on the IDF component manager:
+# https://docs.espressif.com/projects/esp-idf/en/stable/esp32/api-guides/tools/idf-component-manager.html
+#
+# Check the readme for each dependency for more information on install and usage.
+#
+dependencies:
+  # atomgl:
+  #   git: https://github.com/atomvm/atomgl
+  #   version: "main"
+  # atomvm_mqtt_client:
+  #   git: https://github.com/atomvm/atomvm_mqtt_client
+  #   version: "main"
+  # atomvm_esp32cam:
+  #   # NB requires certain sdkconfig options to be set, see the readme
+  #   git: https://github.com/atomvm/atomvm_esp32cam
+  #   version: "main"
+  # atomvm_gps:
+  #   git: https://github.com/atomvm/atomvm_gps
+  #   version: "main"
+  # atomvm_neopixel:
+  #   git: https://github.com/atomvm/atomvm_neopixel
+  #   version: "main"
+  # atomvm_m5:
+  #   git: https://github.com/pguyot/atomvm_m5
+  #   version: "main"
+  #
+  # --- Local path examples (non-Docker only) ---
+  #
+  # my_nif:
+  #   # local NIF in a sibling directory next to AtomVM
+  #   path: ../../../../../my_nif
+  # atomvm_mqtt_client:
+  #   # git-cloned NIF in a sibling directory next to AtomVM
+  #   path: ../../../../../atomvm_mqtt_client
