@@ -233,14 +233,14 @@ defmodule Mix.Tasks.Atomvm.Pico.Flash do
         case picotool do
           false ->
             IO.puts(
-              "Error: #{error}\nUnable to locate 'picotool', close the serial monitor before flashing, or install picotool for automatic disconnect and BOOTSEL mode."
+              "Error: #{inspect(error)}\nUnable to locate 'picotool', close the serial monitor before flashing, or install picotool for automatic disconnect and BOOTSEL mode."
             )
 
             exit({:shutdown, 1})
 
           _ ->
             IO.puts(
-              "Warning: #{error}\nFor faster flashing remember to disconnect serial monitor first."
+              "Warning: #{inspect(error)}\nFor faster flashing remember to disconnect serial monitor first."
             )
 
             reset_args = ["reboot", "-f", "-u"]
