@@ -99,16 +99,16 @@ defmodule Mix.Tasks.Atomvm.Esp32.Flash do
       "--baud",
       baud,
       "--before",
-      "default_reset",
+      "default-reset",
       "--after",
-      "hard_reset",
-      "write_flash",
+      "hard-reset",
+      "write-flash",
       "-u",
-      "--flash_mode",
+      "--flash-mode",
       "keep",
-      "--flash_freq",
+      "--flash-freq",
       "keep",
-      "--flash_size",
+      "--flash-size",
       "detect",
       "0x#{Integer.to_string(flash_offset, 16)}",
       "#{Project.config()[:app]}.avm"
@@ -120,18 +120,6 @@ defmodule Mix.Tasks.Atomvm.Esp32.Flash do
       {:module, Pythonx} ->
         IO.puts("Flashing using Pythonx installed esptool..")
         ExAtomVM.EsptoolHelper.setup()
-
-        # avoid deprecation warnings, as we know we are esptool version 5+, when using Pythonx.
-        tool_args =
-          Enum.map(tool_args, fn
-            "--flash_mode" -> "--flash-mode"
-            "--flash_freq" -> "--flash-freq"
-            "--flash_size" -> "--flash-size"
-            "default_reset" -> "default-reset"
-            "hard_reset" -> "hard-reset"
-            "write_flash" -> "write-flash"
-            arg -> arg
-          end)
 
         case ExAtomVM.EsptoolHelper.flash_pythonx(tool_args) do
           true -> exit({:shutdown, 0})
@@ -153,7 +141,7 @@ defmodule Mix.Tasks.Atomvm.Esp32.Flash do
   end
 
   defp get_esptool_path(<<"">>) do
-    "esptool.py"
+    "esptool"
   end
 
   defp get_esptool_path(idf_path) do
