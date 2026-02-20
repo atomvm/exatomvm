@@ -35,7 +35,8 @@ defmodule ExAtomVM.MixProject do
       {:uf2tool, "1.1.0", runtime: false},
       {:ex_doc, "~> 0.20", only: :dev, runtime: false},
       {:pythonx, "~> 0.4.0", runtime: false, optional: true},
-      {:req, "~> 0.5.0", runtime: false, optional: true}
+      {:req, "~> 0.5.0", runtime: false, optional: true},
+      {:igniter, "~> 0.7", runtime: false, optional: true}
     ]
   end
 end
