@@ -19,7 +19,7 @@ defmodule ExAtomVM.EsptoolHelper do
         version = "0.0.0"
         requires-python = "==3.13.*"
         dependencies = [
-          "esptool==5.0.2"
+          "esptool==5.2.0"
         ]
         """)
 
