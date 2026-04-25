@@ -14,7 +14,7 @@ defmodule Mix.Tasks.Atomvm.Esp32.Build do
   **Without Docker:**
     * CMake (3.13 or later)
     * Ninja (preferred) or Make
-    * ESP-IDF (v5.5.2 recommended)
+    * ESP-IDF (v5.5.4 or later recommended)
 
   **With Docker (--use-docker flag):**
     * Docker
@@ -29,7 +29,7 @@ defmodule Mix.Tasks.Atomvm.Esp32.Build do
     * `--chip` - Target chip(s), comma-separated for multiple (default: esp32, options: esp32, esp32s2, esp32s3, esp32c2, esp32c3, esp32c6, esp32h2, esp32p4)
     * `--idf-path` - Path to idf.py executable (default: idf.py)
     * `--use-docker` - Use ESP-IDF Docker image instead of local installation
-    * `--idf-version` - ESP-IDF version for Docker image (default: v5.5.2)
+    * `--idf-version` - ESP-IDF version for Docker image (default: v5.5.4)
     * `--clean` - Clean build directory before building
     * `--mbedtls-prefix` - Path to custom MbedTLS installation (optional, falls back to MBEDTLS_PREFIX env var)
 
@@ -54,7 +54,7 @@ defmodule Mix.Tasks.Atomvm.Esp32.Build do
       mix atomvm.esp32.build --atomvm-path ./_build/atomvm_source/AtomVM/ --use-docker --chip esp32s3
 
       # Build using Docker with specific IDF version
-      mix atomvm.esp32.build --atomvm-path ./_build/atomvm_source/AtomVM/ --use-docker --idf-version v5.5.2 --chip esp32s3
+      mix atomvm.esp32.build --atomvm-path ./_build/atomvm_source/AtomVM/ --use-docker --idf-version v5.5.4 --chip esp32s3
 
       # Build with custom MbedTLS
       mix atomvm.esp32.build --atomvm-path /path/to/AtomVM --mbedtls-prefix /usr/local/opt/mbedtls@3
@@ -77,7 +77,7 @@ defmodule Mix.Tasks.Atomvm.Esp32.Build do
   @default_ref "main"
   @default_atomvm_url "https://github.com/atomvm/AtomVM"
   @default_idf_path "idf.py"
-  @default_idf_version "v5.5.2"
+  @default_idf_version "v5.5.4"
 
   @impl Mix.Task
   def run(args) do
