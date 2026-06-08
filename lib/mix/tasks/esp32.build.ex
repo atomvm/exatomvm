@@ -248,11 +248,21 @@ defmodule Mix.Tasks.Atomvm.Esp32.Build do
         nil ->
           {:error,
            """
-           ESP-IDF not found. Please install and set up ESP-IDF:
+           ESP-IDF not found in the current environment.
+
+           If ESP-IDF is already installed, activate it in this shell with:
+
+             get_idf
+
+           If the get_idf alias is not configured, source the export script directly:
+
+             . "$HOME/esp/esp-idf/export.sh"
+
+           To install ESP-IDF, follow Espressif's setup guide:
 
            https://docs.espressif.com/projects/esp-idf/en/latest/esp32/get-started/
 
-           Or use --use-docker to build with Docker instead.
+           Alternatively, use --use-docker to build with Espressif's ESP-IDF Docker image.
            """}
 
         idf_path_found ->
