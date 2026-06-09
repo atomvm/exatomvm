@@ -91,6 +91,202 @@ defmodule ExAtomVM.EsptoolHelper do
     Pythonx.decode(globals["result"])
   end
 
+  def read_flash_with_size(port, address, size, reset_after \\ false) do
+    case (try do
+            Pythonx.eval(
+              """
+              from esptool.cmds import (
+                  attach_flash,
+                  detect_chip,
+                  detect_flash_size,
+                  read_flash,
+                  reset_chip,
+              )
+              from esptool.util import flash_size_bytes
+
+              port = port.decode("utf-8")
+
+              with detect_chip(port) as esp:
+                  attach_flash(esp)
+                  try:
+                      flash_size_name = detect_flash_size(esp)
+                      if flash_size_name is None:
+                          raise RuntimeError("Unable to detect flash size")
+
+                      data = read_flash(
+                          esp,
+                          address,
+                          size,
+                          None,
+                          flash_size=flash_size_name,
+                          no_progress=True,
+                      )
+                      result = {
+                          "bootloader_offset": esp.BOOTLOADER_FLASH_OFFSET,
+                          "chip_name": esp.CHIP_NAME,
+                          "data": data,
+                          "flash_size": flash_size_bytes(flash_size_name),
+                          "flash_size_id": esp.parse_flash_size_arg(flash_size_name),
+                          "flash_size_name": flash_size_name,
+                      }
+                  finally:
+                      if reset_after:
+                          reset_chip(esp, "hard-reset")
+
+                  if not reset_after:
+                      # Keep USB-OTG devices such as ESP32-S2 in a usable state.
+                      esp.run_stub()
+              """,
+              %{
+                "address" => address,
+                "port" => port,
+                "reset_after" => reset_after,
+                "size" => size
+              }
+            )
+          rescue
+            e in Pythonx.Error ->
+              {:error, {:pythonx_error, "Pythonx error occurred: #{inspect(e)}"}}
+          end) do
+      {_result, %{"result" => result}} ->
+        {:ok, Pythonx.decode(result)}
+
+      {:error, reason} ->
+        {:error, reason}
+
+      _ ->
+        {:error, :flash_read_failed}
+    end
+  end
+
+  def write_flash_data(port, address, data) when is_binary(data) do
+    case (try do
+            Pythonx.eval(
+              """
+              from esptool.cmds import attach_flash, detect_chip, reset_chip, write_flash
+
+              port = port.decode("utf-8")
+
+              with detect_chip(port) as esp:
+                  attach_flash(esp)
+                  try:
+                      write_flash(esp, [(address, data)], flash_size="keep")
+                      result = True
+                  finally:
+                      reset_chip(esp, "hard-reset")
+              """,
+              %{"address" => address, "data" => data, "port" => port}
+            )
+          rescue
+            e in Pythonx.Error ->
+              {:error, {:pythonx_error, "Pythonx error occurred: #{inspect(e)}"}}
+          end) do
+      {_result, %{"result" => result}} ->
+        {:ok, Pythonx.decode(result)}
+
+      {:error, reason} ->
+        {:error, reason}
+
+      _ ->
+        {:error, :flash_write_failed}
+    end
+  end
+
+  def write_flash_size_and_partition(
+        port,
+        bootloader_offset,
+        bootloader,
+        partition_table_offset,
+        partition_table,
+        flash_size_name
+      )
+      when is_binary(bootloader) and is_binary(partition_table) do
+    case (try do
+            Pythonx.eval(
+              """
+              from esptool.cmds import (
+                  _update_image_flash_params,
+                  attach_flash,
+                  detect_chip,
+                  detect_flash_size,
+                  reset_chip,
+                  write_flash,
+              )
+
+              port = port.decode("utf-8")
+              flash_size_name = flash_size_name.decode("utf-8")
+
+              with detect_chip(port) as esp:
+                  attach_flash(esp)
+                  try:
+                      if esp.BOOTLOADER_FLASH_OFFSET != bootloader_offset:
+                          raise RuntimeError(
+                              f"Unexpected bootloader offset {bootloader_offset:#x}; "
+                              f"{esp.CHIP_NAME} uses {esp.BOOTLOADER_FLASH_OFFSET:#x}"
+                          )
+                      if esp.secure_download_mode or esp.get_secure_boot_enabled():
+                          raise RuntimeError(
+                              "Cannot update the flash-size header when secure boot "
+                              "or secure download mode is enabled"
+                          )
+
+                      detected_size = detect_flash_size(esp)
+                      if detected_size != flash_size_name:
+                          raise RuntimeError(
+                              f"Flash size changed from {flash_size_name} "
+                              f"to {detected_size or 'unknown'}"
+                          )
+
+                      updated_bootloader = _update_image_flash_params(
+                          esp,
+                          bootloader_offset,
+                          "keep",
+                          "keep",
+                          flash_size_name,
+                          bootloader,
+                      )
+                      expected_size_id = esp.parse_flash_size_arg(flash_size_name)
+                      if updated_bootloader[0] != esp.ESP_IMAGE_MAGIC:
+                          raise RuntimeError("Invalid bootloader image header")
+                      if updated_bootloader[3] & 0xF0 != expected_size_id:
+                          raise RuntimeError("Failed to update bootloader flash-size header")
+
+                      write_flash(
+                          esp,
+                          [
+                              (bootloader_offset, updated_bootloader),
+                              (partition_table_offset, partition_table),
+                          ],
+                          flash_size="keep",
+                      )
+                      result = True
+                  finally:
+                      reset_chip(esp, "hard-reset")
+              """,
+              %{
+                "bootloader" => bootloader,
+                "bootloader_offset" => bootloader_offset,
+                "flash_size_name" => flash_size_name,
+                "partition_table" => partition_table,
+                "partition_table_offset" => partition_table_offset,
+                "port" => port
+              }
+            )
+          rescue
+            e in Pythonx.Error ->
+              {:error, {:pythonx_error, "Pythonx error occurred: #{inspect(e)}"}}
+          end) do
+      {_result, %{"result" => result}} ->
+        {:ok, Pythonx.decode(result)}
+
+      {:error, reason} ->
+        {:error, reason}
+
+      _ ->
+        {:error, :flash_write_failed}
+    end
+  end
+
   @doc """
   Erases flash of an ESP32 device.
     --after "no-reset" is needed for keeping USB-OTG devices like esp32-S2 in a good state.
