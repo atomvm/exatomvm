@@ -14,6 +14,29 @@ defmodule ExAtomVM.AtomVMBuilder do
   @default_atomvm_url "https://github.com/atomvm/AtomVM"
 
   @doc """
+  Recursively remove a directory, tolerating the macOS race where Finder/Spotlight
+  recreates `.DS_Store` between deleting a directory's contents and removing the
+  directory itself (which makes `File.rm_rf!/1` fail with `:eexist`).
+
+  Retries a few times, then raises if the directory still cannot be removed.
+  """
+  def clean_dir(dir, attempts \\ 3) do
+    case File.rm_rf(dir) do
+      {:ok, _} ->
+        :ok
+
+      {:error, _reason, _path} when attempts > 1 ->
+        clean_dir(dir, attempts - 1)
+
+      {:error, reason, path} ->
+        raise File.Error,
+          reason: reason,
+          path: path,
+          action: "remove files and directories recursively from"
+    end
+  end
+
+  @doc """
   Clone or update an AtomVM repository at the given URL and ref.
 
   Returns the path to the local repository.
@@ -52,7 +75,7 @@ defmodule ExAtomVM.AtomVMBuilder do
 
     if clean and File.dir?(build_dir) do
       IO.puts("Cleaning generic Unix build directory...")
-      File.rm_rf!(build_dir)
+      clean_dir(build_dir)
     end
 
     packbeam_path = Path.join([build_dir, "tools", "packbeam", "PackBEAM"])
@@ -134,7 +157,7 @@ defmodule ExAtomVM.AtomVMBuilder do
 
     if File.dir?(avm_deps_dir) do
       IO.puts("Removing existing avm_deps folder...")
-      File.rm_rf!(avm_deps_dir)
+      clean_dir(avm_deps_dir)
     end
 
     IO.puts("Creating avm_deps folder and copying libraries...")

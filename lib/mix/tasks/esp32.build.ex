@@ -7,8 +7,8 @@ defmodule Mix.Tasks.Atomvm.Esp32.Build do
   ## Requirements
 
   **General requirements**
-    * Erlang/OTP (27 or later)
-    * Elixir (1.18 or later)
+    * Erlang/OTP (25 or later)
+    * Elixir (1.16 or later)
     * Git
 
   **Without Docker:**
@@ -146,6 +146,7 @@ defmodule Mix.Tasks.Atomvm.Esp32.Build do
     """)
 
     with :ok <- check_esp_idf(idf_path, use_docker, idf_version),
+         :ok <- check_escript(),
          :ok <- ExAtomVM.AtomVMBuilder.build_generic_unix(atomvm_path, mbedtls_prefix, clean) do
       results =
         chips
@@ -211,7 +212,17 @@ defmodule Mix.Tasks.Atomvm.Esp32.Build do
   end
 
   defp relative_path(path, cwd) do
-    Path.relative_to(path, cwd)
+    Path.relative_to(path, cwd, force: true)
+  end
+
+  defp check_escript do
+    case System.find_executable("escript") do
+      nil ->
+        {:error, "escript not found. Please install Erlang/OTP and ensure escript is on PATH."}
+
+      _ ->
+        :ok
+    end
   end
 
   defp save_image(src_img) do
@@ -308,7 +319,7 @@ defmodule Mix.Tasks.Atomvm.Esp32.Build do
 
     if clean and File.dir?(build_dir) do
       IO.puts("Cleaning build directory...")
-      File.rm_rf!(build_dir)
+      ExAtomVM.AtomVMBuilder.clean_dir(build_dir)
     end
 
     IO.puts("Configuring build for #{chip}...")
@@ -340,7 +351,13 @@ defmodule Mix.Tasks.Atomvm.Esp32.Build do
         case build_status do
           0 ->
             copy_dependencies_lock(platform_dir)
-            create_flashable_image(Path.expand(atomvm_path), Path.expand(build_dir), chip)
+
+            create_flashable_image(
+              Path.expand(atomvm_path),
+              Path.expand(build_dir),
+              chip,
+              use_docker
+            )
 
           _status ->
             {:error, "Build failed"}
@@ -385,7 +402,7 @@ defmodule Mix.Tasks.Atomvm.Esp32.Build do
     end
   end
 
-  defp create_flashable_image(atomvm_path, build_dir, chip) do
+  defp create_flashable_image(atomvm_path, build_dir, chip, use_docker) do
     mkimage_erl = Path.join(build_dir, "mkimage.erl")
     mkimage_config = Path.join(build_dir, "mkimage.config")
     output_img = Path.join(build_dir, "atomvm-#{chip}-elixir.img")
@@ -406,7 +423,7 @@ defmodule Mix.Tasks.Atomvm.Esp32.Build do
 
       true ->
         IO.puts("Creating flashable image...")
-        run_mkimage(atomvm_path, build_dir, mkimage_erl, mkimage_config, output_img)
+        run_mkimage(atomvm_path, build_dir, mkimage_erl, mkimage_config, output_img, use_docker)
     end
   end
 
@@ -416,13 +433,20 @@ defmodule Mix.Tasks.Atomvm.Esp32.Build do
     |> String.contains?("esp32boot/esp32boot.avm")
   end
 
-  defp run_mkimage(atomvm_path, build_dir, mkimage_erl, mkimage_config, output_img) do
+  defp run_mkimage(atomvm_path, build_dir, mkimage_erl, mkimage_config, output_img, use_docker) do
     case System.find_executable("escript") do
       nil ->
         {:error, "escript not found. Please install Erlang/OTP and ensure escript is on PATH."}
 
       escript ->
-        local_config = local_mkimage_config(atomvm_path, build_dir, mkimage_config)
+        # Only Docker-generated configs reference container `/project` paths and
+        # need localizing; local builds already contain valid host paths.
+        local_config =
+          if use_docker do
+            local_mkimage_config(atomvm_path, build_dir, mkimage_config)
+          else
+            mkimage_config
+          end
 
         {_output, status} =
           System.cmd(
@@ -434,21 +458,38 @@ defmodule Mix.Tasks.Atomvm.Esp32.Build do
           )
 
         case status do
-          0 -> {:ok, output_img}
+          0 -> verify_output_image(output_img)
           _ -> {:error, "Failed to create image"}
         end
     end
   end
 
+  defp verify_output_image(output_img) do
+    case File.stat(output_img) do
+      {:ok, %File.Stat{type: :regular, size: size}} when size > 0 ->
+        {:ok, output_img}
+
+      {:ok, _stat} ->
+        {:error, "mkimage completed but produced no valid image at #{output_img}"}
+
+      {:error, reason} ->
+        {:error,
+         "mkimage completed but did not create #{output_img}: #{:file.format_error(reason)}"}
+    end
+  end
+
   defp local_mkimage_config(atomvm_path, build_dir, mkimage_config) do
     content = File.read!(mkimage_config)
+    # The host path is inserted inside an Erlang double-quoted string, so escape
+    # any `\` and `"` that are legal in POSIX paths but special in Erlang strings.
+    replacement = escape_erlang_string_content(atomvm_path)
     # Only rewrite "/project" when it appears as a path prefix inside a quoted
     # string (i.e. followed by `/` or a closing quote), to avoid clobbering
     # unrelated tokens like "/project_backup/..." or comments.
-    # Use the function form so backslashes / `\N` sequences in atomvm_path are
-    # not interpreted as replacement escapes / backrefs by Regex.replace/3.
+    # Use the function form so backslashes / `\N` sequences in the replacement
+    # are not interpreted as replacement escapes / backrefs by Regex.replace/3.
     local_content =
-      Regex.replace(~r{(?<=")/project(?=/|")}, content, fn _ -> atomvm_path end)
+      Regex.replace(~r{(?<=")/project(?=/|")}, content, fn _ -> replacement end)
 
     if local_content == content do
       mkimage_config
@@ -457,6 +498,12 @@ defmodule Mix.Tasks.Atomvm.Esp32.Build do
       File.write!(local_config, local_content)
       local_config
     end
+  end
+
+  defp escape_erlang_string_content(path) do
+    path
+    |> String.replace("\\", "\\\\")
+    |> String.replace("\"", "\\\"")
   end
 
   defp run_idf_docker(idf_version, atomvm_path, platform_dir, idf_args) do
