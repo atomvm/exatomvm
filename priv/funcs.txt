@@ -535,6 +535,8 @@ erts_debug:module_info/0
 erts_debug:module_info/1
 erts_internal:cmp_term/2
 erts_internal:get_creation/0
+erts_internal:mc_iterator/1
+erts_internal:mc_refill/1
 erts_internal:module_info/0
 erts_internal:module_info/1
 esp32devmode:erase_net_config/0
@@ -1196,6 +1198,8 @@ port:module_info/0
 port:module_info/1
 proc_lib:init_ack/1
 proc_lib:init_ack/2
+proc_lib:init_fail/2
+proc_lib:init_fail/3
 proc_lib:init_p/5
 proc_lib:initial_call/1
 proc_lib:module_info/0
@@ -1683,6 +1687,7 @@ Elixir.Console:module_info/1
 Elixir.Console:print/1
 Elixir.Console:puts/1
 Elixir.Console:puts/2
+Elixir.Enum:__in__/2
 Elixir.Enum:__info__/1
 Elixir.Enum:all?/1
 Elixir.Enum:all?/2
