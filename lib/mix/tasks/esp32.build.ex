@@ -7,14 +7,14 @@ defmodule Mix.Tasks.Atomvm.Esp32.Build do
   ## Requirements
 
   **General requirements**
-    * Erlang/OTP (27 or later)
-    * Elixir (1.18 or later)
+    * Erlang/OTP (25 or later)
+    * Elixir (1.16 or later)
     * Git
 
   **Without Docker:**
     * CMake (3.13 or later)
     * Ninja (preferred) or Make
-    * ESP-IDF (v5.5.2 recommended)
+    * ESP-IDF (v5.5.4 or later recommended)
 
   **With Docker (--use-docker flag):**
     * Docker
@@ -29,7 +29,7 @@ defmodule Mix.Tasks.Atomvm.Esp32.Build do
     * `--chip` - Target chip(s), comma-separated for multiple (default: esp32, options: esp32, esp32s2, esp32s3, esp32c2, esp32c3, esp32c6, esp32h2, esp32p4)
     * `--idf-path` - Path to idf.py executable (default: idf.py)
     * `--use-docker` - Use ESP-IDF Docker image instead of local installation
-    * `--idf-version` - ESP-IDF version for Docker image (default: v5.5.2)
+    * `--idf-version` - ESP-IDF version for Docker image (default: v5.5.4)
     * `--clean` - Clean build directory before building
     * `--mbedtls-prefix` - Path to custom MbedTLS installation (optional, falls back to MBEDTLS_PREFIX env var)
 
@@ -50,11 +50,11 @@ defmodule Mix.Tasks.Atomvm.Esp32.Build do
       # Build for specific chip with clean build
       mix atomvm.esp32.build --atomvm-path /path/to/AtomVM --chip esp32s3 --clean
 
-      # Build using Docker (relative path with ./ is important)
+      # Build using Docker (relative paths are expanded automatically)
       mix atomvm.esp32.build --atomvm-path ./_build/atomvm_source/AtomVM/ --use-docker --chip esp32s3
 
       # Build using Docker with specific IDF version
-      mix atomvm.esp32.build --atomvm-path ./_build/atomvm_source/AtomVM/ --use-docker --idf-version v5.5.2 --chip esp32s3
+      mix atomvm.esp32.build --atomvm-path ./_build/atomvm_source/AtomVM/ --use-docker --idf-version v5.5.4 --chip esp32s3
 
       # Build with custom MbedTLS
       mix atomvm.esp32.build --atomvm-path /path/to/AtomVM --mbedtls-prefix /usr/local/opt/mbedtls@3
@@ -77,7 +77,8 @@ defmodule Mix.Tasks.Atomvm.Esp32.Build do
   @default_ref "main"
   @default_atomvm_url "https://github.com/atomvm/AtomVM"
   @default_idf_path "idf.py"
-  @default_idf_version "v5.5.2"
+  @default_idf_version "v5.5.4"
+  @elixir_cmake_arg "-DATOMVM_ELIXIR_SUPPORT=on"
 
   @impl Mix.Task
   def run(args) do
@@ -114,7 +115,9 @@ defmodule Mix.Tasks.Atomvm.Esp32.Build do
     mbedtls_prefix =
       Keyword.get(opts, :mbedtls_prefix) || System.get_env("MBEDTLS_PREFIX")
 
-    # Use --atomvm-path, --atomvm-url, or default to AtomVM/AtomVM main branch
+    # Use --atomvm-path, --atomvm-url, or default to AtomVM/AtomVM main branch.
+    # Expand to an absolute path so Docker bind mounts (`-v <host>:/project`)
+    # and any later relative-path math work consistently.
     atomvm_path =
       cond do
         atomvm_path ->
@@ -123,6 +126,7 @@ defmodule Mix.Tasks.Atomvm.Esp32.Build do
         true ->
           ExAtomVM.AtomVMBuilder.clone_or_update_repo(atomvm_url, ref)
       end
+      |> Path.expand()
 
     # Verify AtomVM path exists
     unless File.dir?(atomvm_path) do
@@ -142,6 +146,7 @@ defmodule Mix.Tasks.Atomvm.Esp32.Build do
     """)
 
     with :ok <- check_esp_idf(idf_path, use_docker, idf_version),
+         :ok <- check_escript(),
          :ok <- ExAtomVM.AtomVMBuilder.build_generic_unix(atomvm_path, mbedtls_prefix, clean) do
       results =
         chips
@@ -154,10 +159,8 @@ defmodule Mix.Tasks.Atomvm.Esp32.Build do
           force_clean = index > 1 or clean
 
           case build_atomvm(atomvm_path, chip, idf_path, idf_version, use_docker, force_clean) do
-            :ok ->
-              build_dir = Path.join([atomvm_path, "src", "platforms", "esp32", "build"])
-              src_img = Path.join([build_dir, "atomvm-#{chip}.img"])
-              img = save_image(src_img, chip)
+            {:ok, src_img} ->
+              img = save_image(src_img)
               {chip, :ok, img}
 
             {:error, reason} ->
@@ -209,13 +212,23 @@ defmodule Mix.Tasks.Atomvm.Esp32.Build do
   end
 
   defp relative_path(path, cwd) do
-    "./#{Path.relative_to(path, cwd)}"
+    Path.relative_to(path, cwd, force: true)
   end
 
-  defp save_image(src_img, chip) do
+  defp check_escript do
+    case System.find_executable("escript") do
+      nil ->
+        {:error, "escript not found. Please install Erlang/OTP and ensure escript is on PATH."}
+
+      _ ->
+        :ok
+    end
+  end
+
+  defp save_image(src_img) do
     output_dir = Path.join([File.cwd!(), "_build", "atomvm_images"])
     File.mkdir_p!(output_dir)
-    dest_img = Path.join(output_dir, "atomvm-#{chip}.img")
+    dest_img = Path.join(output_dir, Path.basename(src_img))
 
     if File.exists?(src_img) do
       File.cp!(src_img, dest_img)
@@ -246,53 +259,27 @@ defmodule Mix.Tasks.Atomvm.Esp32.Build do
         nil ->
           {:error,
            """
-           ESP-IDF not found. Please install and set up ESP-IDF:
+           ESP-IDF not found in the current environment.
+
+           If ESP-IDF is already installed, activate it in this shell with:
+
+             get_idf
+
+           If the get_idf alias is not configured, source the export script directly:
+
+             . "$HOME/esp/esp-idf/export.sh"
+
+           To install ESP-IDF, follow Espressif's setup guide:
 
            https://docs.espressif.com/projects/esp-idf/en/latest/esp32/get-started/
 
-           Or use --use-docker to build with Docker instead.
+           Alternatively, use --use-docker to build with Espressif's ESP-IDF Docker image.
            """}
 
         idf_path_found ->
           IO.puts("Found ESP-IDF: #{idf_path_found}")
           :ok
       end
-    end
-  end
-
-  defp configure_elixir_partitions(platform_dir) do
-    # Per AtomVM docs: Add partition config to sdkconfig.defaults before building
-    sdkconfig_defaults = platform_dir |> Path.join("sdkconfig.defaults")
-
-    IO.puts("Configuring Elixir partition table (partitions-elixir.csv)...")
-
-    # Read existing defaults or create empty
-    content =
-      if File.exists?(sdkconfig_defaults) do
-        File.read!(sdkconfig_defaults)
-      else
-        ""
-      end
-
-    # Check if partition config already exists
-    if not String.contains?(content, "CONFIG_PARTITION_TABLE_CUSTOM_FILENAME") do
-      # Append Elixir partition configuration
-      new_content =
-        content <> "\nCONFIG_PARTITION_TABLE_CUSTOM_FILENAME=\"partitions-elixir.csv\"\n"
-
-      File.write!(sdkconfig_defaults, new_content)
-      IO.puts("✓ Added partitions-elixir.csv to sdkconfig.defaults")
-    else
-      # Replace existing config
-      new_content =
-        content
-        |> String.replace(
-          ~r/CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="[^"]+"/,
-          ~s(CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions-elixir.csv")
-        )
-
-      File.write!(sdkconfig_defaults, new_content)
-      IO.puts("✓ Updated sdkconfig.defaults to use partitions-elixir.csv")
     end
   end
 
@@ -332,109 +319,191 @@ defmodule Mix.Tasks.Atomvm.Esp32.Build do
 
     if clean and File.dir?(build_dir) do
       IO.puts("Cleaning build directory...")
-      File.rm_rf!(build_dir)
+      ExAtomVM.AtomVMBuilder.clean_dir(build_dir)
     end
 
     IO.puts("Configuring build for #{chip}...")
 
-    # Configure Elixir partition table in sdkconfig.defaults BEFORE set-target
-    configure_elixir_partitions(platform_dir)
-
-    # Set target chip
     {_output, status} =
-      if use_docker do
-        run_idf_docker(idf_version, atomvm_path, platform_dir, ["set-target", chip])
-      else
-        System.cmd(idf_path, ["set-target", chip],
-          cd: platform_dir,
-          stderr_to_stdout: true,
-          into: IO.stream(:stdio, :line)
-        )
-      end
+      run_idf_command(
+        use_docker,
+        idf_version,
+        atomvm_path,
+        platform_dir,
+        idf_path,
+        idf_set_target_args(chip)
+      )
 
     case status do
       0 ->
-        # Reconfigure to ensure partition table settings are applied
-        IO.puts("Reconfiguring to apply Elixir partitions...")
+        IO.puts("Building AtomVM... (this may take several minutes)")
 
-        {_output, status} =
-          if use_docker do
-            run_idf_docker(idf_version, atomvm_path, platform_dir, ["reconfigure"])
-          else
-            System.cmd(idf_path, ["reconfigure"],
-              cd: platform_dir,
-              stderr_to_stdout: true,
-              into: IO.stream(:stdio, :line)
-            )
-          end
+        {_output, build_status} =
+          run_idf_command(
+            use_docker,
+            idf_version,
+            atomvm_path,
+            platform_dir,
+            idf_path,
+            idf_build_args()
+          )
 
-        status =
-          case status do
-            0 ->
-              IO.puts("Building AtomVM... (this may take several minutes)")
-
-              {_output, build_status} =
-                if use_docker do
-                  run_idf_docker(idf_version, atomvm_path, platform_dir, ["build"])
-                else
-                  System.cmd(idf_path, ["build"],
-                    cd: platform_dir,
-                    stderr_to_stdout: true,
-                    into: IO.stream(:stdio, :line)
-                  )
-                end
-
-              if build_status == 0 do
-                # Copy dependencies.lock back to project root if it was created/updated
-                repo_dependencies_lock = Path.join(platform_dir, "dependencies.lock")
-
-                if File.exists?(repo_dependencies_lock) do
-                  dest_path = Path.join(File.cwd!(), "dependencies.lock")
-                  IO.puts("Updating dependencies.lock in project root...")
-                  File.cp!(repo_dependencies_lock, dest_path)
-                end
-              end
-
-              build_status
-
-            _ ->
-              status
-          end
-
-        case status do
+        case build_status do
           0 ->
-            # Use absolute paths to avoid issues with relative paths
-            abs_atomvm_path = Path.expand(atomvm_path)
-            abs_build_dir = Path.expand(build_dir)
-            mkimage_script = Path.join([abs_build_dir, "mkimage.sh"])
+            copy_dependencies_lock(platform_dir)
 
-            IO.puts("Creating flashable image...")
-            # TODO: Remove --boot flag when AtomVM#1163 is merged
-            boot_avm =
-              Path.join([abs_atomvm_path, "build", "libs", "esp32boot", "elixir_esp32boot.avm"])
+            create_flashable_image(
+              Path.expand(atomvm_path),
+              Path.expand(build_dir),
+              chip,
+              use_docker
+            )
 
-            {_output, status} =
-              System.cmd("sh", [mkimage_script, "--boot", boot_avm],
-                cd: abs_build_dir,
-                stderr_to_stdout: true,
-                into: IO.stream(:stdio, :line)
-              )
-
-            case status do
-              0 ->
-                :ok
-
-              _ ->
-                {:error, "Failed to create image"}
-            end
-
-          _ ->
+          _status ->
             {:error, "Build failed"}
         end
 
-      _ ->
+      _status ->
         {:error, "Failed to set target chip"}
     end
+  end
+
+  defp idf_set_target_args(chip) do
+    [@elixir_cmake_arg, "set-target", chip]
+  end
+
+  defp idf_build_args do
+    [@elixir_cmake_arg, "build"]
+  end
+
+  defp run_idf_command(true, idf_version, atomvm_path, platform_dir, _idf_path, idf_args) do
+    run_idf_docker(idf_version, atomvm_path, platform_dir, idf_args)
+  end
+
+  defp run_idf_command(false, _idf_version, _atomvm_path, platform_dir, idf_path, idf_args) do
+    System.cmd(idf_path, idf_args,
+      cd: platform_dir,
+      stderr_to_stdout: true,
+      into: IO.stream(:stdio, :line)
+    )
+  end
+
+  defp copy_dependencies_lock(platform_dir) do
+    repo_dependencies_lock = Path.join(platform_dir, "dependencies.lock")
+
+    if File.exists?(repo_dependencies_lock) do
+      dest_path = Path.join(File.cwd!(), "dependencies.lock")
+
+      if not File.exists?(dest_path) or
+           File.read!(dest_path) != File.read!(repo_dependencies_lock) do
+        IO.puts("Updating project dependencies.lock from ESP-IDF component manager...")
+        File.cp!(repo_dependencies_lock, dest_path)
+      end
+    end
+  end
+
+  defp create_flashable_image(atomvm_path, build_dir, chip, use_docker) do
+    mkimage_erl = Path.join(build_dir, "mkimage.erl")
+    mkimage_config = Path.join(build_dir, "mkimage.config")
+    output_img = Path.join(build_dir, "atomvm-#{chip}-elixir.img")
+
+    cond do
+      not File.exists?(mkimage_erl) ->
+        {:error, "mkimage.erl not found in #{build_dir}"}
+
+      not File.exists?(mkimage_config) ->
+        {:error, "mkimage.config not found in #{build_dir}"}
+
+      stock_esp32boot_configured?(mkimage_config) ->
+        {:error,
+         "mkimage.config still points at stock esp32boot.avm. " <>
+           "The ESP32 build was not configured with AtomVM Elixir support; " <>
+           "retry with --clean, and ensure the AtomVM ref honours -DATOMVM_ELIXIR_SUPPORT=on " <>
+           "(older AtomVM revisions predate this CMake option)."}
+
+      true ->
+        IO.puts("Creating flashable image...")
+        run_mkimage(atomvm_path, build_dir, mkimage_erl, mkimage_config, output_img, use_docker)
+    end
+  end
+
+  defp stock_esp32boot_configured?(mkimage_config) do
+    mkimage_config
+    |> File.read!()
+    |> String.contains?("esp32boot/esp32boot.avm")
+  end
+
+  defp run_mkimage(atomvm_path, build_dir, mkimage_erl, mkimage_config, output_img, use_docker) do
+    case System.find_executable("escript") do
+      nil ->
+        {:error, "escript not found. Please install Erlang/OTP and ensure escript is on PATH."}
+
+      escript ->
+        # Only Docker-generated configs reference container `/project` paths and
+        # need localizing; local builds already contain valid host paths.
+        local_config =
+          if use_docker do
+            local_mkimage_config(atomvm_path, build_dir, mkimage_config)
+          else
+            mkimage_config
+          end
+
+        {_output, status} =
+          System.cmd(
+            escript,
+            [mkimage_erl, "--config", local_config, "--out", output_img],
+            cd: build_dir,
+            stderr_to_stdout: true,
+            into: IO.stream(:stdio, :line)
+          )
+
+        case status do
+          0 -> verify_output_image(output_img)
+          _ -> {:error, "Failed to create image"}
+        end
+    end
+  end
+
+  defp verify_output_image(output_img) do
+    case File.stat(output_img) do
+      {:ok, %File.Stat{type: :regular, size: size}} when size > 0 ->
+        {:ok, output_img}
+
+      {:ok, _stat} ->
+        {:error, "mkimage completed but produced no valid image at #{output_img}"}
+
+      {:error, reason} ->
+        {:error,
+         "mkimage completed but did not create #{output_img}: #{:file.format_error(reason)}"}
+    end
+  end
+
+  defp local_mkimage_config(atomvm_path, build_dir, mkimage_config) do
+    content = File.read!(mkimage_config)
+    # The host path is inserted inside an Erlang double-quoted string, so escape
+    # any `\` and `"` that are legal in POSIX paths but special in Erlang strings.
+    replacement = escape_erlang_string_content(atomvm_path)
+    # Only rewrite "/project" when it appears as a path prefix inside a quoted
+    # string (i.e. followed by `/` or a closing quote), to avoid clobbering
+    # unrelated tokens like "/project_backup/..." or comments.
+    # Use the function form so backslashes / `\N` sequences in the replacement
+    # are not interpreted as replacement escapes / backrefs by Regex.replace/3.
+    local_content =
+      Regex.replace(~r{(?<=")/project(?=/|")}, content, fn _ -> replacement end)
+
+    if local_content == content do
+      mkimage_config
+    else
+      local_config = Path.join(build_dir, "mkimage.local.config")
+      File.write!(local_config, local_content)
+      local_config
+    end
+  end
+
+  defp escape_erlang_string_content(path) do
+    path
+    |> String.replace("\\", "\\\\")
+    |> String.replace("\"", "\\\"")
   end
 
   defp run_idf_docker(idf_version, atomvm_path, platform_dir, idf_args) do

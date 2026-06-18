@@ -18,7 +18,7 @@ defmodule Mix.Tasks.Atomvm.Esp32.Install do
       mix atomvm.esp32.install
 
       # Install custom-built image (erases flash)
-      mix atomvm.esp32.install --image /path/to/AtomVM-esp32s3.img
+      mix atomvm.esp32.install --image ./_build/atomvm_images/atomvm-esp32s3-elixir.img
 
       # Install with custom baud rate
       mix atomvm.esp32.install --baud 115200
