@@ -364,6 +364,24 @@ Example:
     Leaving...
     Hard resetting via RTS pin...
 
+### The `atomvm.esp32.expand` task
+
+The `atomvm.esp32.expand` task expands a final `main.avm` partition to use the
+rest of the ESP32's detected physical flash. It updates the flash size encoded
+in the bootloader image header, reads the existing partition table at `0x8000`,
+preserves all offsets and other partitions, updates the partition table
+checksum, flashes both updates, and verifies them.
+
+This is useful when an AtomVM image contains a partition table sized for a
+smaller flash chip. Detected 8 MB, 16 MB, and 32 MB flash sizes are supported.
+
+    shell$ mix atomvm.esp32.expand --port /dev/tty.usbserial
+
+Omit `--port` to use the configured AtomVM port or select a connected device
+automatically. The task refuses to make changes when another partition follows
+`main.avm`, because expanding it would overwrite that partition. It also
+refuses to modify devices with secure boot or secure download mode enabled.
+
 ### The `atomvm.stm32.flash` task
 
 The `atomvm.stm32.flash` task is used to flash your application to a micro-controller and executed by the AtomVM virtual machine.
