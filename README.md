@@ -337,6 +337,7 @@ If no AtomVM source is supplied, the task clones the AtomVM `main` branch automa
 | `--clean` | `false` | Clean the build directory before building |
 | `--mbedtls-prefix` | - | Path to a custom MbedTLS installation (falls back to the `MBEDTLS_PREFIX` env var) |
 | `--partition-table` | - | Path to custom partition table CSV file (falls back to `custom_partitions.csv` in project root) |
+| `--sdkconfig` | - | Path to custom `sdkconfig.defaults` file (falls back to `sdkconfig.defaults` in project root) |
 
 #### Custom partition table
 
@@ -353,6 +354,22 @@ ExAtomVM passes custom partition contents through unchanged, without imposing pa
 The selected file is read once before cloning or building and reused for every chip, even if cleaning removes the source file. Its contents are copied into the AtomVM ESP32 platform tree only while the build runs — so Docker builds see it through the mounted AtomVM source tree — and the original partition table is restored afterwards, leaving the AtomVM checkout clean.
 
 > Note. When a custom partition table is used (either via `--partition-table` or default `custom_partitions.csv`), the task automatically forces a clean ESP32 platform build so CMake regenerates the partition layout — you do not need to pass `--clean` yourself.
+
+#### Custom sdkconfig defaults
+
+You can explicitly specify a custom `sdkconfig.defaults` file with the `--sdkconfig` option:
+
+```shell
+mix atomvm.esp32.build --sdkconfig path/to/my_config.defaults
+```
+
+If the `--sdkconfig` option is not provided but the root of your Mix project contains `sdkconfig.defaults`, it is used as the default configuration file for the build.
+
+The task also supports chip-specific defaults by looking for a suffix corresponding to the target chip, e.g. `sdkconfig.defaults.esp32s3` or `my_config.defaults.esp32s3`. If found, these chip-specific overrides are automatically appended to the base defaults. A chip-specific file can also be used without a base file.
+
+Staging custom configuration files automatically forces a clean build so CMake and ESP-IDF re-evaluate all settings. The files are staged temporarily and the AtomVM checkout is restored clean after compilation.
+
+> **Note:** Do not run multiple `mix atomvm.esp32.build` processes concurrently against the same `--atomvm-path`. Custom sdkconfig staging temporarily modifies the target-specific defaults file in the AtomVM checkout.
 
 #### Examples
 
