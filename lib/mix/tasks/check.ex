@@ -50,17 +50,8 @@ defmodule Mix.Tasks.Atomvm.Check do
         {:init, _}, acc ->
           ["kill" | acc]
 
-        {:test, :is_ne, _, _}, acc ->
-          ["is_not_equal" | acc]
-
-        {:test, :is_ne_exact, _, _}, acc ->
-          ["is_not_eq_exact" | acc]
-
-        {:test, :is_eq, _, _}, acc ->
-          ["is_equal" | acc]
-
-        {:test, test, _, _}, acc ->
-          ["#{test}" | acc]
+        instr, acc when is_tuple(instr) and elem(instr, 0) == :test ->
+          ["#{test_name(elem(instr, 1))}" | acc]
 
         instr, acc when is_tuple(instr) ->
           ["#{elem(instr, 0)}" | acc]
@@ -71,6 +62,14 @@ defmodule Mix.Tasks.Atomvm.Check do
 
     {module_name, instructions}
   end
+
+  # A test tuple carries the instruction name second and comes in several sizes,
+  # four for a plain comparison and up to six for the bit syntax ones. Three of
+  # the comparisons beam_disasm spells differently from AtomVM's opcode table.
+  defp test_name(:is_eq), do: :is_equal
+  defp test_name(:is_ne), do: :is_not_equal
+  defp test_name(:is_ne_exact), do: :is_not_eq_exact
+  defp test_name(test), do: test
 
   defp extract_instructions(path) do
     files = list_beam_files(path)
