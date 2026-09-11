@@ -14,6 +14,11 @@ defmodule Mix.Tasks.Atomvm.Check do
 
   alias Mix.Project
 
+  # beam_disasm gives the float arithmetic opcodes and raise the same
+  # {:bif, name, fail, args, dest} shape as bif0 to bif3. They are instructions,
+  # listed in instructions.txt, and not calls to an erlang: function.
+  @bif_shaped_instructions [:fadd, :fsub, :fmul, :fdiv, :fnegate, :raise]
+
   def run(args) do
     Mix.Tasks.Compile.run(args)
 
@@ -33,6 +38,9 @@ defmodule Mix.Tasks.Atomvm.Check do
   defp extract_instructions({:beam_file, module_name, _exported_funcs, _, _, code}) do
     instructions =
       scan_instructions(code, fn
+        {:bif, func, _, _, _}, acc when func in @bif_shaped_instructions ->
+          ["#{func}" | acc]
+
         {:bif, _func, _, args, _}, acc ->
           ["bif#{length(args)}" | acc]
 
@@ -98,7 +106,7 @@ defmodule Mix.Tasks.Atomvm.Check do
         {:call_ext_only, _, {:extfunc, module, extfunc, arity}}, acc ->
           [{module, extfunc, arity} | acc]
 
-        {:bif, func, _, args, _}, acc ->
+        {:bif, func, _, args, _}, acc when func not in @bif_shaped_instructions ->
           [{:erlang, func, length(args)} | acc]
 
         {:gc_bif, func, _, _, args, _}, acc ->
