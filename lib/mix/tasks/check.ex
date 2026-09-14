@@ -251,10 +251,19 @@ defmodule Mix.Tasks.Atomvm.Check do
   end
 
   defp scan_instructions(code, fun) do
-    Enum.map(code, fn {:function, _func_name, _, _, func_code} ->
+    code
+    |> Enum.reject(&macro_function?/1)
+    |> Enum.map(fn {:function, _func_name, _, _, func_code} ->
       Enum.reduce(func_code, [], fun)
     end)
     |> List.flatten()
     |> Enum.uniq()
+  end
+
+  # A MACRO- function is the body of a macro or a guard: it runs in the compiler
+  # on the build host and never on AtomVM, so what it calls and the instructions
+  # it uses say nothing about the application.
+  defp macro_function?({:function, name, _, _, _}) do
+    String.starts_with?(Atom.to_string(name), "MACRO-")
   end
 end
