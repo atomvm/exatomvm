@@ -215,15 +215,6 @@ defmodule Mix.Tasks.Atomvm.Check do
     missing_instructions = MapSet.difference(instructions_set, avail_instructions)
 
     if MapSet.size(missing_instructions) != 0 do
-      if MapSet.member?(missing_instructions, "elixir_erl_pass:parens_map_field/2") do
-        IO.puts("""
-        Error:
-          using module.function() notation (with parentheses) to fetch
-          map.field() is deprecated,
-          you must remove the parentheses: map.field
-        """)
-      end
-
       IO.puts("Warning: following missing instructions are used:")
       print_list(missing_instructions)
       IO.puts("")
