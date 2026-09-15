@@ -47,30 +47,34 @@ defmodule Mix.Tasks.Atomvm.Esp32.Install do
     {opts, _} =
       OptionParser.parse!(args, strict: [image: :string, version: :string, baud: :string])
 
+    baud = Keyword.get(opts, :baud, "921600")
+
     case {Keyword.get(opts, :image), Keyword.get(opts, :version)} do
       {nil, version} ->
-        run_with_release(opts, version)
+        install({:release, version}, baud)
 
       {image_path, nil} ->
-        run_with_custom_image(image_path, opts)
+        if not File.exists?(image_path) do
+          IO.puts("Error: Image file not found: #{image_path}")
+          exit({:shutdown, 1})
+        end
+
+        install({:image, image_path}, baud)
 
       {_image_path, _version} ->
         Mix.raise("--image and --version cannot be used together")
     end
   end
 
-  # Install a release from GitHub
-  defp run_with_release(opts, version) do
-    baud = Keyword.get(opts, :baud, "921600")
-
-    with :ok <- check_req_dependency(),
+  defp install(selector, baud) do
+    with :ok <- check_dependencies(selector),
          :ok <- EsptoolHelper.setup(),
          selected_device <- EsptoolHelper.select_device(),
-         release_file <- get_release(selected_device["chip_family_name"], version),
-         :ok <- confirm_erase_and_flash(selected_device, release_file),
+         image_file <- image_file(selector, selected_device),
+         :ok <- confirm_erase_and_flash(selected_device, image_file),
          {:erase, true} <- {:erase, erase_flash(selected_device)},
          :timer.sleep(3000),
-         {:flash, true} <- {:flash, flash_release(selected_device, release_file, baud)} do
+         {:flash, true} <- {:flash, flash_release(selected_device, image_file, baud)} do
       IO.puts("""
 
         Successfully installed AtomVM on #{selected_device["chip_family_name"]} Port: #{selected_device["port"]} MAC: #{selected_device["mac_address"]}
@@ -102,43 +106,15 @@ defmodule Mix.Tasks.Atomvm.Esp32.Install do
     end
   end
 
-  # Install custom-built image
-  defp run_with_custom_image(image_path, opts) do
-    baud = Keyword.get(opts, :baud, "921600")
+  # Only a release download needs Req.
+  defp check_dependencies({:release, _version}), do: check_req_dependency()
+  defp check_dependencies({:image, _path}), do: :ok
 
-    if not File.exists?(image_path) do
-      IO.puts("Error: Image file not found: #{image_path}")
-      exit({:shutdown, 1})
-    end
-
-    with :ok <- EsptoolHelper.setup(),
-         selected_device <- EsptoolHelper.select_device(),
-         :ok <- confirm_erase_and_flash(selected_device, image_path),
-         {:erase, true} <- {:erase, erase_flash(selected_device)},
-         :timer.sleep(3000),
-         {:flash, true} <- {:flash, flash_release(selected_device, image_path, baud)} do
-      IO.puts("""
-
-        Successfully installed AtomVM on #{selected_device["chip_family_name"]} Port: #{selected_device["port"]} MAC: #{selected_device["mac_address"]}
-
-        Your project can be flashed with:
-          mix atomvm.esp32.flash
-
-      """)
-    else
-      {:error, reason} ->
-        IO.puts("Error: #{reason}")
-        exit({:shutdown, 1})
-
-      {:erase, false} ->
-        IO.puts("\nError: erasing the flash failed")
-        exit({:shutdown, 1})
-
-      {:flash, false} ->
-        IO.puts("\nError: flashing AtomVM failed")
-        exit({:shutdown, 1})
-    end
+  defp image_file({:release, version}, device) do
+    get_release(device["chip_family_name"], version)
   end
+
+  defp image_file({:image, path}, _device), do: path
 
   defp confirm_erase_and_flash(selected_device, release_file) do
     confirmation =
