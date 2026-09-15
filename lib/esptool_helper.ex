@@ -394,13 +394,13 @@ defmodule ExAtomVM.EsptoolHelper do
                       })
               except Exception as e:
                   print(f"Error: {e}")
-                  result = []
           """,
           %{}
         )
       catch
         :error, %{__struct__: Pythonx.Error, __exception__: _} = e ->
-          {:error, "Pythonx error occurred: #{inspect(e)}"}
+          IO.puts("Pythonx error occurred: #{inspect(e)}")
+          exit({:shutdown, 1})
       end
 
     Pythonx.decode(globals["result"])
