@@ -16,8 +16,16 @@ defmodule Mix.Tasks.Atomvm.Esp32.Install do
       (cannot be combined with `--version`)
     * `--version` - AtomVM release tag to install, including prereleases (cannot be combined with `--image`)
     * `--baud` - Baud rate for flashing (default: 921600, use 115200 for slower devices)
+    * `--list-images` - List the installable images instead: the latest stable release, newer
+      prereleases, the nightly builds of atomvm-esp32-firmware-factory (with extra components
+      and features such as PSRAM support), and the images on disk. With a connected board, only
+      the images for its chip are listed.
+    * `--chip` - With `--list-images`, list the images for this chip, e.g. `esp32s3`, or `all`
 
   ## Examples
+
+      # See which images can be installed
+      mix atomvm.esp32.install --list-images
 
       # Install latest release from GitHub (erases flash)
       mix atomvm.esp32.install
@@ -49,18 +57,42 @@ defmodule Mix.Tasks.Atomvm.Esp32.Install do
   alias ExAtomVM.Esp32FirmwareImages
   alias ExAtomVM.EsptoolHelper
 
+  @usage "mix atomvm.esp32.install [--version TAG | --image FILE_OR_NAME] [--baud RATE], " <>
+           "or mix atomvm.esp32.install --list-images [--chip CHIP]"
+
   @impl Mix.Task
   def run(args) do
-    {opts, _} =
-      OptionParser.parse!(args, strict: [image: :string, version: :string, baud: :string])
+    {opts, rest, invalid} =
+      OptionParser.parse(args,
+        strict: [
+          image: :string,
+          version: :string,
+          baud: :string,
+          list_images: :boolean,
+          chip: :string
+        ]
+      )
+
+    if rest != [] or invalid != [], do: Mix.raise("Usage: #{@usage}")
 
     baud = Keyword.get(opts, :baud, "921600")
+    image = Keyword.get(opts, :image)
+    version = Keyword.get(opts, :version)
 
-    case {Keyword.get(opts, :image), Keyword.get(opts, :version)} do
-      {nil, version} ->
-        install({:release, version}, baud)
+    cond do
+      opts[:list_images] && (image || version) ->
+        Mix.raise("--list-images cannot be combined with --image or --version")
 
-      {image, nil} ->
+      opts[:list_images] ->
+        list_images(opts[:chip])
+
+      opts[:chip] ->
+        Mix.raise("--chip only applies to --list-images")
+
+      image && version ->
+        Mix.raise("--image and --version cannot be used together")
+
+      image ->
         case Esp32FirmwareImages.classify_image_arg(image) do
           {:path, path} ->
             install({:path, path}, baud)
@@ -69,12 +101,67 @@ defmodule Mix.Tasks.Atomvm.Esp32.Install do
             install({:name, image}, baud)
 
           :error ->
-            Mix.raise("--image must be an image file or the name of a published image: #{image}")
+            Mix.raise(
+              "--image must be an image file or the name of a published image: #{image}; " <>
+                "list them with --list-images"
+            )
         end
 
-      {_image, _version} ->
-        Mix.raise("--image and --version cannot be used together")
+      true ->
+        install({:release, version}, baud)
     end
+  end
+
+  defp list_images(chip) do
+    with {:error, :req_not_available, message} <- check_req_dependency(), do: fail(message)
+    {:ok, _} = Application.ensure_all_started(:req)
+    {filter, header} = list_filter(chip)
+
+    {sections, header} =
+      case Esp32FirmwareImages.fetch_listing() do
+        {:ok, sections} ->
+          {sections, header}
+
+        {:error, reason} ->
+          {[],
+           header ++
+             [
+               "Warning: " <> Esp32FirmwareImages.format_error(reason),
+               "Only local images are listed."
+             ]}
+      end
+
+    sections = sections ++ [Esp32FirmwareImages.local_section()]
+    IO.puts(Esp32FirmwareImages.render_list(sections, filter: filter, header: header))
+  end
+
+  defp list_filter("all"), do: {nil, []}
+  defp list_filter(chip) when is_binary(chip), do: {[chip], []}
+
+  defp list_filter(nil) do
+    case EsptoolHelper.setup() do
+      :ok ->
+        case EsptoolHelper.connected_devices() do
+          [] ->
+            {nil, ["No ESP32 device found, listing every image."]}
+
+          devices ->
+            chips =
+              devices
+              |> Enum.map(&Esp32FirmwareImages.chip_token(&1["chip_family_name"]))
+              |> Enum.uniq()
+
+            {chips, Enum.map(devices, &connected_line/1)}
+        end
+
+      {:error, :pythonx_not_available, _message} ->
+        {nil, ["Pythonx is not available, listing every image."]}
+    end
+  end
+
+  defp connected_line(device) do
+    installed = EsptoolHelper.installed_version(device) || "no AtomVM"
+    "Connected: #{device["chip_family_name"]} on #{device["port"]}, installed: #{installed}"
   end
 
   defp install(selector, baud) do

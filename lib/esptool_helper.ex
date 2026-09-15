@@ -455,4 +455,26 @@ defmodule ExAtomVM.EsptoolHelper do
 
   def format_atomvm_status(true), do: "✅"
   def format_atomvm_status(_), do: "❌"
+
+  @doc """
+  The version string of the AtomVM build on a device, or nil without one.
+  """
+  def installed_version(%{"atomvm_installed" => true, "build_info" => [version | _]}) do
+    sanitize_string(version)
+  end
+
+  def installed_version(_device), do: nil
+
+  @doc false
+  def sanitize_string(str) when is_binary(str) do
+    str
+    # Remove non-printable characters while preserving spaces
+    |> String.replace(~r/[^\x20-\x7E\s]/u, "")
+    |> case do
+      "" -> "<unreadable>"
+      sanitized -> sanitized
+    end
+  end
+
+  def sanitize_string(_), do: "<invalid>"
 end

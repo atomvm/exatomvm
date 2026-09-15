@@ -490,6 +490,155 @@ defmodule ExAtomVM.Esp32FirmwareImagesTest do
     end
   end
 
+  describe "classify_releases/1" do
+    test "keeps the newest stable release and the prereleases newer than it" do
+      releases = [
+        release("v0.7.0-alpha.1", prerelease: true),
+        Map.put(release("v0.7.0-alpha.2", prerelease: true), "draft", true),
+        release("v0.7.0-alpha.0", prerelease: true),
+        release("v0.6.6"),
+        release("v0.6.5"),
+        release("v0.6.0-rc.0", prerelease: true)
+      ]
+
+      assert %{
+               stable: %{"tag_name" => "v0.6.6"},
+               prereleases: [%{"tag_name" => "v0.7.0-alpha.1"}, %{"tag_name" => "v0.7.0-alpha.0"}]
+             } = Images.classify_releases(releases)
+
+      assert %{stable: nil, prereleases: [_, _]} =
+               Images.classify_releases(Enum.take(releases, 3))
+    end
+  end
+
+  describe "listing_sections/2" do
+    test "titles the AtomVM sections by release" do
+      releases = [release("v0.7.0-alpha.1", prerelease: true), release("v0.6.6")]
+
+      assert [
+               %{kind: :stable, title: "Stable release v0.6.6 (2025-06-23)", images: [_ | _]},
+               %{kind: :prerelease, title: "Prerelease v0.7.0-alpha.1 (2025-06-23)"}
+             ] = Images.listing_sections(:atomvm, releases)
+    end
+
+    test "puts every published factory build in one section" do
+      releases = [factory_release(), Map.put(factory_release(), "draft", true)]
+
+      assert [
+               %{
+                 kind: :nightly,
+                 title: "Nightly builds (atomvm-esp32-firmware-factory)",
+                 images: [%{name: @stem}]
+               }
+             ] =
+               Images.listing_sections(:factory, releases)
+    end
+  end
+
+  describe "render_list/2" do
+    setup do
+      sections =
+        Images.listing_sections(:atomvm, [
+          release("v0.7.0-alpha.1", prerelease: true),
+          release("v0.6.6")
+        ]) ++
+          Images.listing_sections(:factory, [factory_release()]) ++
+          [%{kind: :local, title: "Local images", images: local_images()}]
+
+      %{sections: sections}
+    end
+
+    test "lists the images for the filtered chip and counts the others", %{sections: sections} do
+      header = ["Connected: ESP32-S3 on /dev/ttyACM0, installed: v0.6.6"]
+      output = Images.render_list(sections, filter: ["esp32s3"], header: header)
+      lines = String.split(output, "\n")
+
+      assert hd(lines) == hd(header)
+      assert "Showing images for esp32s3; pass --chip all to list every image." in lines
+      assert "Stable release v0.6.6 (2025-06-23)" in lines
+      assert "Prerelease v0.7.0-alpha.1 (2025-06-23)" in lines
+      assert Enum.any?(lines, &(&1 =~ ~r/^  AtomVM-esp32s3-elixir-v0.6.6 +Elixir +2.1 MB$/))
+      assert Enum.any?(lines, &(&1 =~ ~r/^  AtomVM-esp32s3-v0.6.6 +Erlang only +2.1 MB$/))
+      refute Enum.any?(lines, &(&1 =~ "AtomVM-esp32-elixir-v0.6.6"))
+      assert Enum.any?(lines, &(&1 =~ ~r/^  #{@stem} +Erlang only +10.8 MB$/))
+      assert "    build #{@stamp} (2026-09-15), features: atomgl, ipv6, libsodium, psram" in lines
+      assert "Local images" in lines
+
+      assert Enum.any?(
+               lines,
+               &(&1 =~
+                   ~r|^  firmware_images/AtomVM-esp32s3-elixir-v0.6.6.img +Elixir +2.1 MB  cached$|)
+             )
+
+      assert Enum.any?(
+               lines,
+               &(&1 =~
+                   ~r|^  firmware_images/#{@stem}\+20260914.7ab12cd.zip +Erlang only +10.5 MB  cached, no longer published$|)
+             )
+
+      assert Enum.any?(
+               lines,
+               &(&1 =~
+                   ~r|^  _build/atomvm_images/atomvm-esp32s3-elixir.img +Elixir +1.9 MB  built by mix atomvm.esp32.build$|)
+             )
+
+      assert "12 images for other chips not shown." in lines
+      assert "  mix atomvm.esp32.install --image <name or path>" in lines
+
+      assert List.last(lines) ==
+               "None of these fits? mix atomvm.esp32.build builds a custom image from source."
+
+      refute output =~ ~r/[^\x00-\x7F]/
+    end
+
+    test "lists every image without a filter", %{sections: sections} do
+      output = Images.render_list(sections)
+      refute output =~ "not shown"
+      refute output =~ "Showing images"
+      assert output =~ "AtomVM-esp32-elixir-v0.6.6"
+      assert output =~ "AtomVM-esp32p4_pre-elixir-v0.7.0-alpha.1"
+    end
+
+    test "filters the variants of a chip by their base chip", %{sections: sections} do
+      output = Images.render_list(sections, filter: ["esp32p4"])
+      assert output =~ "AtomVM-esp32p4-elixir-v0.7.0-alpha.1"
+      assert output =~ "AtomVM-esp32p4_pre-elixir-v0.7.0-alpha.1"
+
+      output = Images.render_list(sections, filter: ["esp32p4_pre"])
+      refute output =~ "AtomVM-esp32p4-elixir-v0.7.0-alpha.1"
+      assert output =~ "AtomVM-esp32p4_pre-elixir-v0.7.0-alpha.1"
+    end
+  end
+
+  describe "without_extracted/1" do
+    test "lists a cached bundle without the image extracted next to it" do
+      images =
+        Enum.map(
+          [
+            "firmware_images/#{@stem}+20260915.02e1603.zip",
+            "firmware_images/#{@stem}+20260915.02e1603.img",
+            "firmware_images/#{@stem}+20260914.7ab12cd.img",
+            "firmware_images/AtomVM-esp32s3-elixir-v0.6.6.img"
+          ],
+          &Images.local_image/1
+        )
+
+      assert Enum.map(Images.without_extracted(images), & &1.file) == [
+               "#{@stem}+20260915.02e1603.zip",
+               "#{@stem}+20260914.7ab12cd.img",
+               "AtomVM-esp32s3-elixir-v0.6.6.img"
+             ]
+    end
+  end
+
+  describe "format_size/1" do
+    test "rounds to a tenth of a megabyte, or to kilobytes" do
+      assert Images.format_size(2_197_764) == "2.1 MB"
+      assert Images.format_size(315_504) == "309 KB"
+      assert Images.format_size(nil) == ""
+    end
+  end
+
   describe "select_release_image/3" do
     setup do
       %{images: Images.release_images(release("v0.7.0-alpha.1", prerelease: true))}
@@ -589,6 +738,17 @@ defmodule ExAtomVM.Esp32FirmwareImagesTest do
       "body" => "",
       "assets" => List.flatten(images) ++ others
     }
+  end
+
+  defp local_images do
+    [
+      {"firmware_images/AtomVM-esp32s3-elixir-v0.6.6.img", :cache, 2_201_860},
+      {"firmware_images/#{@stem}+20260914.7ab12cd.zip", :cache, 11_000_000},
+      {"_build/atomvm_images/atomvm-esp32s3-elixir.img", :build, 2_000_000}
+    ]
+    |> Enum.map(fn {path, source, size} ->
+      Map.merge(Images.local_image(path), %{source: source, size: size})
+    end)
   end
 
   defp factory_release do

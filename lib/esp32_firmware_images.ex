@@ -6,7 +6,9 @@ defmodule ExAtomVM.Esp32FirmwareImages do
 
   @atomvm_releases_url "https://api.github.com/repos/atomvm/atomvm/releases"
   @factory_releases_url "https://api.github.com/repos/atomvm/atomvm-esp32-firmware-factory/releases"
+  @releases_page_size 10
   @cache_dir "firmware_images"
+  @build_images_dir "_build/atomvm_images"
 
   @flash_offsets %{
     "esp32" => 0x1000,
@@ -185,12 +187,199 @@ defmodule ExAtomVM.Esp32FirmwareImages do
     end
   end
 
+  defp releases_url(:atomvm, :list),
+    do: @atomvm_releases_url <> "?per_page=#{@releases_page_size}"
+
+  defp releases_url(:factory, :list),
+    do: @factory_releases_url <> "?per_page=#{@releases_page_size}"
+
   defp releases_url(:atomvm, tag), do: release_api_url(tag)
   defp releases_url(:factory, nil), do: @factory_releases_url <> "/latest"
 
   defp releases_url(:factory, tag) do
     @factory_releases_url <> "/tags/" <> URI.encode(tag, &URI.char_unreserved?/1)
   end
+
+  @doc """
+  The sections of `--list-images`, one API call per source: the latest stable
+  AtomVM release and the prereleases newer than it, then the nightly builds.
+  """
+  def fetch_listing(sources \\ [:atomvm, :factory]) do
+    Enum.reduce_while(sources, {:ok, []}, fn source, {:ok, sections} ->
+      case fetch_json(releases_url(source, :list)) do
+        {:ok, releases} -> {:cont, {:ok, sections ++ listing_sections(source, releases)}}
+        {:error, reason} -> {:halt, {:error, reason}}
+      end
+    end)
+  end
+
+  def listing_sections(:atomvm, releases) do
+    %{stable: stable, prereleases: prereleases} = classify_releases(releases)
+
+    for {kind, release} <-
+          List.wrap(stable && {:stable, stable}) ++ Enum.map(prereleases, &{:prerelease, &1}) do
+      label = if kind == :stable, do: "Stable release", else: "Prerelease"
+      title = "#{label} #{release["tag_name"]} (#{date(release["published_at"])})"
+      %{kind: kind, title: title, images: release_images(release, :atomvm)}
+    end
+  end
+
+  def listing_sections(:factory, releases) do
+    images =
+      for release <- releases,
+          not release["draft"],
+          image <- release_images(release, :factory),
+          do: image
+
+    [%{kind: :nightly, title: "Nightly builds (atomvm-esp32-firmware-factory)", images: images}]
+  end
+
+  @doc """
+  The newest stable release and the prereleases newer than it, out of the
+  list GitHub returns, newest first.
+  """
+  def classify_releases(releases) do
+    case releases |> Enum.reject(& &1["draft"]) |> Enum.split_while(& &1["prerelease"]) do
+      {prereleases, [stable | _older]} -> %{stable: stable, prereleases: prereleases}
+      {prereleases, []} -> %{stable: nil, prereleases: prereleases}
+    end
+  end
+
+  @doc """
+  The images on disk: the cache, and what mix atomvm.esp32.build produced.
+  """
+  def local_section do
+    %{kind: :local, title: "Local images", images: local_images()}
+  end
+
+  def local_images do
+    without_extracted(files(cache_dir(), @cache_dir, :cache)) ++
+      files(@build_images_dir, @build_images_dir, :build)
+  end
+
+  @doc """
+  Drops the image extracted next to a cached bundle, listing the bundle only.
+  """
+  def without_extracted(images) do
+    bundles = for %{kind: :zip} = image <- images, do: {image.name, image.stamp}
+
+    Enum.reject(images, fn image ->
+      image.kind == :img and {image.name, image.stamp} in bundles
+    end)
+  end
+
+  defp files(dir, shown_as, source) do
+    case File.ls(dir) do
+      {:ok, files} ->
+        for file <- Enum.sort(files), String.ends_with?(file, [".img", ".zip"]) do
+          path = Path.join(dir, file)
+
+          Map.merge(file_image(file), %{
+            source: source,
+            path: Path.join(shown_as, file),
+            size: File.stat!(path).size
+          })
+        end
+
+      {:error, _reason} ->
+        []
+    end
+  end
+
+  @doc """
+  The text of `--list-images`: the sections, images for the chips in
+  `:filter` only when given, after the `:header` lines.
+  """
+  def render_list(sections, opts \\ []) do
+    filter = Keyword.get(opts, :filter)
+    header = Keyword.get(opts, :header, [])
+
+    published =
+      for %{kind: :nightly, images: images} <- sections,
+          image <- images,
+          do: {image.name, image.stamp}
+
+    {shown, hidden} =
+      Enum.map_reduce(sections, 0, fn section, hidden ->
+        {kept, dropped} = Enum.split_with(section.images, &listed?(&1, filter))
+        {%{section | images: kept}, hidden + length(dropped)}
+      end)
+
+    body =
+      for %{images: images} = section <- shown, images != [] do
+        width = images |> Enum.map(&String.length(label(section, &1))) |> Enum.max()
+        [section.title | Enum.flat_map(images, &row(section, &1, width, published))] ++ [""]
+      end
+
+    filter_line =
+      if filter,
+        do: [
+          "Showing images for #{Enum.join(filter, ", ")}; pass --chip all to list every image."
+        ],
+        else: []
+
+    intro = header ++ filter_line
+    intro = if intro == [], do: [], else: intro ++ [""]
+    hidden_line = if hidden > 0, do: ["#{hidden} images for other chips not shown.", ""], else: []
+
+    footer = [
+      "Install with:",
+      "  mix atomvm.esp32.install --image <name or path>",
+      "  mix atomvm.esp32.install --version <tag>        the Elixir image of a release",
+      "Older releases: https://github.com/atomvm/AtomVM/releases",
+      "None of these fits? mix atomvm.esp32.build builds a custom image from source."
+    ]
+
+    Enum.join(intro ++ List.flatten(body) ++ hidden_line ++ footer, "\n")
+  end
+
+  defp listed?(_image, nil), do: true
+
+  defp listed?(image, chips) do
+    chip = image_chip(image)
+    chip == nil or chip in chips or image.chip in chips
+  end
+
+  defp label(%{kind: :local}, image), do: image.path
+  defp label(_section, image), do: image.name
+
+  defp row(section, image, width, published) do
+    columns = [
+      String.pad_trailing(label(section, image), width),
+      String.pad_trailing(flavor(image), 11),
+      format_size(image.size)
+    ]
+
+    first = "  " <> Enum.join(columns, "  ") <> note(section, image, published)
+
+    case section.kind do
+      :nightly ->
+        features =
+          if image.features == [], do: "", else: ", features: " <> Enum.join(image.features, ", ")
+
+        [first, "    build #{image.stamp || "unknown"} (#{image.published_at})#{features}"]
+
+      _kind ->
+        [first]
+    end
+  end
+
+  defp note(%{kind: :local}, %{source: :build}, _published),
+    do: "  built by mix atomvm.esp32.build"
+
+  defp note(%{kind: :local}, %{channel: :nightly, stamp: stamp} = image, published)
+       when is_binary(stamp) do
+    if published == [] or {image.name, stamp} in published,
+      do: "  cached",
+      else: "  cached, no longer published"
+  end
+
+  defp note(%{kind: :local}, _image, _published), do: "  cached"
+  defp note(_section, _image, _published), do: ""
+
+  def format_size(nil), do: ""
+  def format_size(bytes) when bytes >= 1_048_576, do: "#{Float.round(bytes / 1_048_576, 1)} MB"
+  def format_size(bytes), do: "#{div(bytes + 1023, 1024)} KB"
 
   @doc """
   What `--image` names: a file, or a published image to fetch by name.
@@ -370,29 +559,30 @@ defmodule ExAtomVM.Esp32FirmwareImages do
   naming convention, taken as is otherwise.
   """
   def local_image(path) do
-    file = Path.basename(path)
+    Map.merge(file_image(Path.basename(path)), %{source: :local, path: path})
+  end
 
-    image =
-      case parse_name(file) do
-        {:ok, image} ->
-          image
+  defp file_image(file) do
+    case parse_name(file) do
+      {:ok, image} ->
+        image
 
-        {:error, _reason} ->
-          %{
-            name: String.replace_suffix(file, ".img", ""),
-            file: file,
-            kind: :img,
-            chip: nil,
-            base_chip: nil,
-            elixir?: nil,
-            features: [],
-            version: nil,
-            channel: :local,
-            stamp: nil
-          }
-      end
+      {:error, _reason} ->
+        {stem, kind} = split_extension(file)
 
-    Map.merge(image, %{source: :local, path: path})
+        %{
+          name: stem,
+          file: file,
+          kind: kind || :img,
+          chip: nil,
+          base_chip: nil,
+          elixir?: nil,
+          features: [],
+          version: nil,
+          channel: :local,
+          stamp: nil
+        }
+    end
   end
 
   @doc """
