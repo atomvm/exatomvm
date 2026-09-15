@@ -3,13 +3,15 @@ defmodule Mix.Tasks.Atomvm.Esp32.Install do
   Mix task for erasing flash and installing AtomVM to connected device.
 
   By default, downloads and installs the latest AtomVM release from GitHub.
-  Optionally, can install a custom-built image using the --image option.
+  Optionally, can install a specific release using the --version option or a
+  custom-built image using the --image option.
 
   **WARNING:** This task erases the current flash before installing.
 
   ## Options
 
-    * `--image` - Path to custom AtomVM .img file (optional, downloads latest release if not provided)
+    * `--image` - Path to a custom AtomVM .img file (cannot be combined with `--version`)
+    * `--version` - AtomVM release tag to install, including prereleases (cannot be combined with `--image`)
     * `--baud` - Baud rate for flashing (default: 921600, use 115200 for slower devices)
 
   ## Examples
@@ -19,6 +21,9 @@ defmodule Mix.Tasks.Atomvm.Esp32.Install do
 
       # Install custom-built image (erases flash)
       mix atomvm.esp32.install --image ./_build/atomvm_images/atomvm-esp32s3-elixir.img
+
+      # Install a specific release, including prereleases (erases flash)
+      mix atomvm.esp32.install --version v0.7.0-alpha.1
 
       # Install with custom baud rate
       mix atomvm.esp32.install --baud 115200
@@ -30,29 +35,35 @@ defmodule Mix.Tasks.Atomvm.Esp32.Install do
 
   @shortdoc "Install AtomVM to ESP32 device"
 
+  @github_releases_url "https://api.github.com/repos/atomvm/atomvm/releases"
+
   alias ExAtomVM.EsptoolHelper
 
   @impl Mix.Task
   def run(args) do
-    {opts, _} = OptionParser.parse!(args, strict: [image: :string, baud: :string])
+    {opts, _} =
+      OptionParser.parse!(args, strict: [image: :string, version: :string, baud: :string])
 
-    case Keyword.get(opts, :image) do
-      nil ->
-        run_with_latest_release(opts)
+    case {Keyword.get(opts, :image), Keyword.get(opts, :version)} do
+      {nil, version} ->
+        run_with_release(opts, version)
 
-      image_path ->
+      {image_path, nil} ->
         run_with_custom_image(image_path, opts)
+
+      {_image_path, _version} ->
+        Mix.raise("--image and --version cannot be used together")
     end
   end
 
-  # Install latest release from GitHub
-  defp run_with_latest_release(opts) do
+  # Install a release from GitHub
+  defp run_with_release(opts, version) do
     baud = Keyword.get(opts, :baud, "921600")
 
     with :ok <- check_req_dependency(),
          :ok <- EsptoolHelper.setup(),
          selected_device <- EsptoolHelper.select_device(),
-         release_file <- get_latest_release(selected_device["chip_family_name"]),
+         release_file <- get_release(selected_device["chip_family_name"], version),
          :ok <- confirm_erase_and_flash(selected_device, release_file),
          true <-
            EsptoolHelper.erase_flash([
@@ -159,7 +170,7 @@ defmodule Mix.Tasks.Atomvm.Esp32.Install do
     end
   end
 
-  defp get_latest_release(chip_family) do
+  defp get_release(chip_family, version) do
     cache_dir =
       if Code.ensure_loaded?(Mix.Project) do
         Path.join(Path.dirname(Mix.Project.build_path()), "atomvm_binaries")
@@ -171,7 +182,7 @@ defmodule Mix.Tasks.Atomvm.Esp32.Install do
 
     {:ok, _} = Application.ensure_all_started(:req)
 
-    with {:ok, response} <- Req.get("https://api.github.com/repos/atomvm/atomvm/releases/latest"),
+    with {:ok, response} <- Req.get(release_api_url(version)),
          %{status: 200, body: body} <- response,
          assets <- body["assets"] || [],
          asset when not is_nil(asset) <- Enum.find(assets, &matches_chip_family?(&1, chip_family)) do
@@ -189,12 +200,23 @@ defmodule Mix.Tasks.Atomvm.Esp32.Install do
       {:error, reason} ->
         raise "Failed to fetch release: #{inspect(reason)}"
 
+      %{status: 404} when is_binary(version) ->
+        Mix.raise("AtomVM release not found: #{inspect(version)}")
+
       %{status: status} ->
         raise "GitHub API returned status #{status}"
 
       nil ->
-        raise "No matching release found for #{chip_family}"
+        release = version || "the latest release"
+        raise "No matching Elixir image found for #{chip_family} in #{release}"
     end
+  end
+
+  @doc false
+  def release_api_url(nil), do: @github_releases_url <> "/latest"
+
+  def release_api_url(version) when is_binary(version) do
+    @github_releases_url <> "/tags/" <> URI.encode(version, &URI.char_unreserved?/1)
   end
 
   defp matches_chip_family?(%{"name" => name}, chip_family) do
