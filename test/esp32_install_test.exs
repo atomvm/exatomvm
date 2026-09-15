@@ -23,6 +23,14 @@ defmodule Mix.Tasks.Atomvm.Esp32.InstallTest do
     end
   end
 
+  test "points at the other images when installing the latest release" do
+    assert Install.latest_release_hint("v0.6.6") == """
+           💡 Installing AtomVM v0.6.6, the latest stable release.
+              Nightly builds and images with extra components and features (for example
+              PSRAM support) are also available: mix atomvm.esp32.install --list-images
+           """
+  end
+
   test "rejects a repository that is not OWNER/REPO" do
     assert_raise Mix.Error, ~r/^--repo must be a GitHub repository/, fn ->
       Install.run(["--repo", "https://gitlab.com/acme/builds", "--list-images"])

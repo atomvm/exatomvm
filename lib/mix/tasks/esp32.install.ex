@@ -249,6 +249,7 @@ defmodule Mix.Tasks.Atomvm.Esp32.Install do
     {:ok, _} = Application.ensure_all_started(:req)
 
     with {:ok, image} <- release_image(chip, version, source || :atomvm) do
+      if version == nil and source == nil, do: IO.puts("\n" <> latest_release_hint(image.tag))
       cache(image)
     end
   end
@@ -267,6 +268,15 @@ defmodule Mix.Tasks.Atomvm.Esp32.Install do
     else
       {:ok, Esp32FirmwareImages.local_image(path)}
     end
+  end
+
+  @doc false
+  def latest_release_hint(tag) do
+    """
+    💡 Installing AtomVM #{tag}, the latest stable release.
+       Nightly builds and images with extra components and features (for example
+       PSRAM support) are also available: mix atomvm.esp32.install --list-images
+    """
   end
 
   # An AtomVM release image has a fixed name, so a cached copy is used without
