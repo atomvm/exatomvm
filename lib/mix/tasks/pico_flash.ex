@@ -155,7 +155,7 @@ defmodule Mix.Tasks.Atomvm.Pico.Flash do
         wait_for_mount(mount, count + 1)
 
       error ->
-        IO.puts("unexpected error: #{error} while checking pico mount path.")
+        IO.puts("unexpected error: #{inspect(error)} while checking pico mount path.")
         exit({:shutdown, 1})
     end
   end
@@ -263,7 +263,7 @@ defmodule Mix.Tasks.Atomvm.Pico.Flash do
                 end
 
               _ ->
-                IO.puts("Failed to prepare pico for flashing: #{error}")
+                IO.puts("Failed to prepare pico for flashing: #{inspect(error)}")
             end
         end
     end
