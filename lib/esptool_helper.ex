@@ -79,8 +79,8 @@ defmodule ExAtomVM.EsptoolHelper do
                   exit_code = int(str(e))
                   result = exit_code == 0
               except Exception as e:
-                  print(f"Warning: {e}")
-                  result = True
+                  print(f"Error: {e}")
+                  result = False
 
           """,
           %{"tool_args" => tool_args}
@@ -337,7 +337,7 @@ defmodule ExAtomVM.EsptoolHelper do
                   exit_code = int(str(e))
                   result = exit_code == 0
               except Exception as e:
-                  print(f"Warning: {e}")
+                  print(f"Error: {e}")
                   result = False
           """,
           %{"tool_args" => tool_args}

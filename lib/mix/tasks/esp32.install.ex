@@ -68,17 +68,9 @@ defmodule Mix.Tasks.Atomvm.Esp32.Install do
          selected_device <- EsptoolHelper.select_device(),
          release_file <- get_release(selected_device["chip_family_name"], version),
          :ok <- confirm_erase_and_flash(selected_device, release_file),
-         true <-
-           EsptoolHelper.erase_flash([
-             "--port",
-             selected_device["port"],
-             "--chip",
-             "auto",
-             "--after",
-             "no-reset"
-           ]),
+         {:erase, true} <- {:erase, erase_flash(selected_device)},
          :timer.sleep(3000),
-         true <- flash_release(selected_device, release_file, baud) do
+         {:flash, true} <- {:flash, flash_release(selected_device, release_file, baud)} do
       IO.puts("""
 
         Successfully installed AtomVM on #{selected_device["chip_family_name"]} Port: #{selected_device["port"]} MAC: #{selected_device["mac_address"]}
@@ -99,6 +91,14 @@ defmodule Mix.Tasks.Atomvm.Esp32.Install do
       {:error, reason} ->
         IO.puts("Error: #{reason}")
         exit({:shutdown, 1})
+
+      {:erase, false} ->
+        IO.puts("\nError: erasing the flash failed")
+        exit({:shutdown, 1})
+
+      {:flash, false} ->
+        IO.puts("\nError: flashing AtomVM failed")
+        exit({:shutdown, 1})
     end
   end
 
@@ -114,17 +114,9 @@ defmodule Mix.Tasks.Atomvm.Esp32.Install do
     with :ok <- EsptoolHelper.setup(),
          selected_device <- EsptoolHelper.select_device(),
          :ok <- confirm_erase_and_flash(selected_device, image_path),
-         true <-
-           EsptoolHelper.erase_flash([
-             "--port",
-             selected_device["port"],
-             "--chip",
-             "auto",
-             "--after",
-             "no-reset"
-           ]),
+         {:erase, true} <- {:erase, erase_flash(selected_device)},
          :timer.sleep(3000),
-         true <- flash_release(selected_device, image_path, baud) do
+         {:flash, true} <- {:flash, flash_release(selected_device, image_path, baud)} do
       IO.puts("""
 
         Successfully installed AtomVM on #{selected_device["chip_family_name"]} Port: #{selected_device["port"]} MAC: #{selected_device["mac_address"]}
@@ -136,6 +128,14 @@ defmodule Mix.Tasks.Atomvm.Esp32.Install do
     else
       {:error, reason} ->
         IO.puts("Error: #{reason}")
+        exit({:shutdown, 1})
+
+      {:erase, false} ->
+        IO.puts("\nError: erasing the flash failed")
+        exit({:shutdown, 1})
+
+      {:flash, false} ->
+        IO.puts("\nError: flashing AtomVM failed")
         exit({:shutdown, 1})
     end
   end
@@ -232,6 +232,17 @@ defmodule Mix.Tasks.Atomvm.Esp32.Install do
 
     String.contains?(name, [chip_family]) && String.contains?(name, ["elixir"]) &&
       String.ends_with?(name, ".img")
+  end
+
+  defp erase_flash(device) do
+    EsptoolHelper.erase_flash([
+      "--port",
+      device["port"],
+      "--chip",
+      "auto",
+      "--after",
+      "no-reset"
+    ])
   end
 
   defp flash_release(device, release_file, baud) do
