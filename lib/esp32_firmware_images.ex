@@ -1121,6 +1121,243 @@ defmodule ExAtomVM.Esp32FirmwareImages do
     end
   end
 
+  @partition_table_offset 0x8000
+  @partition_table_size 0xC00
+  @bootloader_desc_offset 0x20
+
+  @doc """
+  What an update writes, the VM (the app partition) and the boot library,
+  with the partition table and the bootloader of the image to check the
+  board against: the parts of a bundle, or slices of an image cut along the
+  partition table embedded in it.
+  """
+  def update_parts(%{kind: :zip, path: path} = image, _base) do
+    with {:ok, bundle} <- verify_bundle(File.read!(path), Path.basename(path), image.stamp) do
+      bundle_update_parts(bundle)
+    end
+  end
+
+  def update_parts(image, base) do
+    slice_image(File.read!(image_path(image)), base)
+  end
+
+  def bundle_update_parts(%{parts: parts, flash: flash, image: image})
+      when map_size(parts) == 0 do
+    slice_image(image, flash.flash_offset)
+  end
+
+  def bundle_update_parts(%{parts: parts, flash: flash, stem: stem}) do
+    offsets = Map.new(flash.parts, &{&1.name, &1.offset})
+    lib_name = Enum.find(Map.keys(parts), &String.ends_with?(&1, ".avm"))
+
+    wanted = [
+      "bootloader.bin",
+      "partition-table.bin",
+      "atomvm-esp32.bin",
+      lib_name || "boot library"
+    ]
+
+    case wanted -- Map.keys(parts) do
+      [] ->
+        {:ok,
+         %{
+           bootloader: parts["bootloader.bin"],
+           table: parts["partition-table.bin"],
+           app: {offsets["atomvm-esp32.bin"], "atomvm-esp32.bin", parts["atomvm-esp32.bin"]},
+           lib: {offsets[lib_name], lib_name, parts[lib_name]}
+         }}
+
+      missing ->
+        {:error, {:bad_bundle, stem <> ".zip", {:missing_members, missing}}}
+    end
+  end
+
+  @doc """
+  The parts of a plain image: its partition table says where the `factory`
+  and `boot.avm` partitions are; the trailing 0xFF of each slice is dropped,
+  since erased flash reads 0xFF.
+  """
+  def slice_image(img, base) do
+    table_start = @partition_table_offset - base
+
+    with :ok <- long_enough(img, table_start + @partition_table_size),
+         table = binary_part(img, table_start, @partition_table_size),
+         {:ok, partitions} <- parse_table(table, :image),
+         {:ok, factory} <- partition(partitions, "factory"),
+         {:ok, boot} <- partition(partitions, "boot.avm"),
+         {:ok, app} <- slice(img, base, factory),
+         {:ok, lib} <- slice(img, base, boot) do
+      {:ok,
+       %{
+         bootloader: trim_erased(binary_part(img, 0, table_start)),
+         table: table,
+         app: {factory.offset, "factory.bin", app},
+         lib: {boot.offset, "boot.avm", lib}
+       }}
+    end
+  end
+
+  defp long_enough(img, size) when byte_size(img) >= size, do: :ok
+  defp long_enough(_img, _size), do: {:error, {:bad_image, :truncated}}
+
+  defp parse_table(table, side) do
+    case ExAtomVM.Esp32PartitionTable.parse(table) do
+      {:ok, partitions} -> {:ok, partitions}
+      {:error, reason} -> {:error, {:partition_mismatch, {:unreadable, side, reason}}}
+    end
+  end
+
+  defp partition(partitions, name) do
+    case Enum.find(partitions, &(&1.name == name)) do
+      nil -> {:error, {:partition_mismatch, {:missing, name}}}
+      partition -> {:ok, partition}
+    end
+  end
+
+  defp slice(img, base, %{offset: offset, size: size, name: name}) do
+    start = offset - base
+
+    data =
+      if start >= 0 and start < byte_size(img),
+        do: trim_erased(binary_part(img, start, min(size, byte_size(img) - start))),
+        else: <<>>
+
+    if data == <<>>, do: {:error, {:bad_image, {:no_data, name}}}, else: {:ok, data}
+  end
+
+  defp trim_erased(bin), do: trim_erased(bin, byte_size(bin))
+  defp trim_erased(_bin, 0), do: <<>>
+
+  defp trim_erased(bin, size) do
+    if :binary.at(bin, size - 1) == 0xFF,
+      do: trim_erased(bin, size - 1),
+      else: binary_part(bin, 0, size)
+  end
+
+  @doc """
+  The descriptor ESP-IDF writes into a bootloader since version 5.1, with
+  the ESP-IDF version it was built with.
+  """
+  def bootloader_desc(
+        <<_::binary-size(@bootloader_desc_offset), 0x50, _::binary-size(7),
+          idf_ver::binary-size(32), _::binary>>
+      ) do
+    {:ok, %{idf_ver: idf_ver |> :binary.split(<<0>>) |> hd()}}
+  end
+
+  def bootloader_desc(_bin), do: :error
+
+  @doc """
+  Compares two ESP-IDF versions, `v5.5.4` or `5.5.4`.
+  """
+  def compare_idf(a, b) do
+    case {idf_version(a), idf_version(b)} do
+      {nil, _b} -> :unknown
+      {_a, nil} -> :unknown
+      {x, y} when x > y -> :gt
+      {x, y} when x < y -> :lt
+      _equal -> :eq
+    end
+  end
+
+  defp idf_version(version) when is_binary(version) do
+    case Regex.run(~r/^v?(\d+)\.(\d+)(?:\.(\d+))?/, version) do
+      [_, major, minor] ->
+        {String.to_integer(major), String.to_integer(minor), 0}
+
+      [_, major, minor, patch] ->
+        {String.to_integer(major), String.to_integer(minor), String.to_integer(patch)}
+
+      nil ->
+        nil
+    end
+  end
+
+  defp idf_version(_version), do: nil
+
+  @doc """
+  The rule of the factory's FLASH.txt: the board's bootloader must not come
+  from a newer ESP-IDF than the image, since a bootloader does not start an
+  app built with an older ESP-IDF. Unknown versions get a warning.
+  """
+  def check_bootloader(board_bootloader, image_bootloader) do
+    board = idf_of(board_bootloader)
+    image = idf_of(image_bootloader)
+
+    case compare_idf(board, image) do
+      :gt ->
+        {:error, {:bootloader_newer, board, image}}
+
+      :unknown ->
+        {:ok,
+         %{
+           board: board,
+           image: image,
+           warning:
+             "the ESP-IDF versions of the board's bootloader (#{board || "unknown"}) and of " <>
+               "the image (#{image || "unknown"}) cannot be compared; a VM built with an older " <>
+               "ESP-IDF than the bootloader does not start"
+         }}
+
+      _older_or_same ->
+        {:ok, %{board: board, image: image, warning: nil}}
+    end
+  end
+
+  defp idf_of(bin) do
+    case bootloader_desc(bin) do
+      {:ok, %{idf_ver: version}} -> version
+      :error -> nil
+    end
+  end
+
+  @doc """
+  An update keeps every partition but the two it writes, so the `factory`
+  and `boot.avm` entries of the board's table must equal the image's, and
+  the parts must fit them. The other entries may differ: an expanded
+  `main.avm` is fine, AtomVM finds its partitions by label.
+  """
+  def check_update_layout(board_table, image_table, app_size, lib_size) do
+    with {:ok, board} <- parse_table(board_table, :board),
+         {:ok, image} <- parse_table(image_table, :image),
+         {:ok, factory} <- same_partition(board, image, "factory"),
+         {:ok, boot} <- same_partition(board, image, "boot.avm"),
+         :ok <- fits(app_size, factory),
+         :ok <- fits(lib_size, boot) do
+      :ok
+    end
+  end
+
+  defp same_partition(board, image, name) do
+    with {:ok, on_board} <- partition(board, name),
+         {:ok, in_image} <- partition(image, name) do
+      keys = [:type, :subtype, :offset, :size]
+
+      if Map.take(on_board, keys) == Map.take(in_image, keys),
+        do: {:ok, in_image},
+        else: {:error, {:partition_mismatch, {name, on_board, in_image}}}
+    end
+  end
+
+  defp fits(size, %{size: max}) when size <= max, do: :ok
+  defp fits(size, %{size: max, name: name}), do: {:error, {:part_too_large, name, size, max}}
+
+  @doc """
+  The lines describing an update in the confirmation prompt.
+  """
+  def update_summary(installed, board_idf, image, parts) do
+    %{app: {app_offset, app_name, _app}, lib: {lib_offset, lib_name, _lib}} = parts
+    bootloader = if board_idf, do: " (bootloader ESP-IDF #{board_idf})", else: ""
+    build = if image.stamp, do: ", build #{image.stamp}", else: ""
+
+    [
+      "  from:  #{installed || "unknown build"}#{bootloader}",
+      "  to:    #{image.name} (#{origin(image)})#{build}",
+      "  writes #{app_name} at #{format_hex(app_offset)} and #{lib_name} at #{format_hex(lib_offset)}",
+      "The bootloader, the partition table, NVS and main.avm are kept."
+    ]
+  end
+
   def format_error({:no_image_for_chip, tag, chip_token, []}) do
     "release #{tag} has no image named for #{chip_token}; " <>
       "custom builds are installed by name with --image"
@@ -1195,6 +1432,45 @@ defmodule ExAtomVM.Esp32FirmwareImages do
   def format_error({:digest_mismatch, file, expected, actual}) do
     "#{file}: sha256 #{actual} does not match the published #{expected}; the download was discarded"
   end
+
+  def format_error(:not_installed) do
+    "no AtomVM installation was found on the board; run without --update to install one"
+  end
+
+  def format_error({:bad_image, :truncated}) do
+    "the image is too short to hold a partition table"
+  end
+
+  def format_error({:bad_image, {:no_data, name}}) do
+    "the image has no data for the #{name} partition"
+  end
+
+  def format_error({:partition_mismatch, {:unreadable, side, reason}}) do
+    "the partition table of the #{side} cannot be read (#{inspect(reason)})"
+  end
+
+  def format_error({:partition_mismatch, {:missing, name}}) do
+    "no #{name} partition in the partition table; install the whole image (without --update)"
+  end
+
+  def format_error({:partition_mismatch, {name, on_board, in_image}}) do
+    "the #{name} partition differs: #{format_hex(on_board.offset)}+#{format_hex(on_board.size)} " <>
+      "on the board, #{format_hex(in_image.offset)}+#{format_hex(in_image.size)} in the image; " <>
+      "install the whole image (without --update)"
+  end
+
+  def format_error({:part_too_large, name, size, max}) do
+    "#{size} bytes do not fit the #{name} partition of #{max} bytes; " <>
+      "install the whole image (without --update)"
+  end
+
+  def format_error({:bootloader_newer, board, image}) do
+    "the board's bootloader comes from ESP-IDF #{board}, newer than the image's #{image}, " <>
+      "and would not start it; install the whole image (without --update)"
+  end
+
+  def format_error({:pythonx_error, message}), do: message
+  def format_error(:flash_read_failed), do: "reading the flash failed"
 
   def format_error(reason), do: inspect(reason)
 

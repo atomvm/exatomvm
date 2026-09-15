@@ -7,7 +7,8 @@ defmodule Mix.Tasks.Atomvm.Esp32.Install do
   a published image by name or a custom-built image by path using the
   --image option.
 
-  **WARNING:** This task erases the current flash before installing.
+  **WARNING:** This task erases the current flash before installing, unless
+  --update is given.
 
   ## Options
 
@@ -21,6 +22,12 @@ defmodule Mix.Tasks.Atomvm.Esp32.Install do
       releases; with `--image` one of its images by name, whatever the name; with
       `--list-images` its builds are listed too. Its images are cached under
       `firmware_images/OWNER-REPO/`
+    * `--update` - Update an existing AtomVM installation instead of erasing the flash: only
+      the virtual machine and its boot library are written, the bootloader, the partition
+      table, NVS (Wi-Fi settings and the like) and the application in `main.avm` are kept.
+      Refused when the board runs no AtomVM, when its `factory` or `boot.avm` partition
+      differs from the image's, or when its bootloader comes from a newer ESP-IDF than the
+      image
     * `--list-images` - List the installable images instead: the latest stable release, newer
       prereleases, the nightly builds of atomvm-esp32-firmware-factory (with extra components
       and features such as PSRAM support), and the images on disk. With a connected board, only
@@ -47,6 +54,10 @@ defmodule Mix.Tasks.Atomvm.Esp32.Install do
       # Install a custom build published by another repository (erases flash)
       mix atomvm.esp32.install --repo acme/atomvm-builds --image esp32s3-kiosk.img
 
+      # Update the AtomVM already on the board to the latest release, keeping
+      # NVS and the application
+      mix atomvm.esp32.install --update
+
       # Install with custom baud rate
       mix atomvm.esp32.install --baud 115200
 
@@ -66,7 +77,13 @@ defmodule Mix.Tasks.Atomvm.Esp32.Install do
   alias ExAtomVM.EsptoolHelper
 
   @usage "mix atomvm.esp32.install [--version TAG | --image FILE_OR_NAME] [--repo OWNER/REPO] " <>
-           "[--baud RATE], or mix atomvm.esp32.install --list-images [--chip CHIP] [--repo OWNER/REPO]"
+           "[--update] [--baud RATE], or mix atomvm.esp32.install --list-images [--chip CHIP] " <>
+           "[--repo OWNER/REPO]"
+
+  @partition_table_offset 0x8000
+  @partition_table_size 0xC00
+  @bootloader_header_size 0x70
+  @update_dir "_build/atomvm_update"
 
   @impl Mix.Task
   def run(args) do
@@ -77,6 +94,7 @@ defmodule Mix.Tasks.Atomvm.Esp32.Install do
           version: :string,
           baud: :string,
           repo: :string,
+          update: :boolean,
           list_images: :boolean,
           chip: :string
         ]
@@ -88,10 +106,11 @@ defmodule Mix.Tasks.Atomvm.Esp32.Install do
     image = Keyword.get(opts, :image)
     version = Keyword.get(opts, :version)
     source = repo_source(Keyword.get(opts, :repo))
+    mode = if opts[:update], do: :update, else: :install
 
     cond do
-      opts[:list_images] && (image || version) ->
-        Mix.raise("--list-images cannot be combined with --image or --version")
+      opts[:list_images] && (image || version || opts[:update]) ->
+        Mix.raise("--list-images cannot be combined with --image, --version or --update")
 
       opts[:list_images] ->
         list_images(opts[:chip], source)
@@ -105,10 +124,10 @@ defmodule Mix.Tasks.Atomvm.Esp32.Install do
       image ->
         case Esp32FirmwareImages.classify_image_arg(image, source != nil) do
           {:path, path} ->
-            install({:path, path}, baud, source)
+            install({:path, path}, baud, source, mode)
 
           {:name, image} ->
-            install({:name, image}, baud, source)
+            install({:name, image}, baud, source, mode)
 
           :error ->
             Mix.raise(
@@ -118,7 +137,7 @@ defmodule Mix.Tasks.Atomvm.Esp32.Install do
         end
 
       true ->
-        install({:release, version}, baud, source)
+        install({:release, version}, baud, source, mode)
     end
   end
 
@@ -184,7 +203,7 @@ defmodule Mix.Tasks.Atomvm.Esp32.Install do
     "Connected: #{device["chip_family_name"]} on #{device["port"]}, installed: #{installed}"
   end
 
-  defp install(selector, baud, source) do
+  defp install(selector, baud, source, mode) do
     with :ok <- check_dependencies(selector),
          :ok <- EsptoolHelper.setup(),
          device <- EsptoolHelper.select_device(),
@@ -192,18 +211,11 @@ defmodule Mix.Tasks.Atomvm.Esp32.Install do
          {:ok, image} <- resolve_image(selector, chip, source),
          :ok <- check_chip(image, chip, device),
          {:ok, offset} <- Esp32FirmwareImages.flash_offset_for(image, chip),
-         :ok <- confirm_erase_and_flash(device, image, chip, offset),
-         {:erase, true} <- {:erase, erase_flash(device)},
-         :timer.sleep(3000),
-         {:flash, true} <- {:flash, flash_image(device, image, offset, baud)} do
-      IO.puts("""
-
-        Successfully installed AtomVM on #{device["chip_family_name"]} Port: #{device["port"]} MAC: #{device["mac_address"]}
-
-        Your project can now be flashed with:
-          mix atomvm.esp32.flash
-
-      """)
+         {:ok, plan} <- plan(mode, device, image, offset),
+         :ok <- confirm(mode, device, image, chip, offset, plan),
+         {:erase, true} <- {:erase, erase(mode, device)},
+         {:flash, true} <- {:flash, write(mode, device, image, offset, baud, plan)} do
+      banner(mode, device)
     else
       {:error, :req_not_available, message} ->
         fail(message)
@@ -298,27 +310,125 @@ defmodule Mix.Tasks.Atomvm.Esp32.Install do
     end
   end
 
-  defp confirm_erase_and_flash(device, image, chip, offset) do
+  defp plan(:install, _device, _image, _offset), do: {:ok, nil}
+
+  defp plan(:update, device, image, offset) do
+    port = device["port"]
+
+    with :ok <- if(device["atomvm_installed"], do: :ok, else: {:error, :not_installed}),
+         {:ok, parts} <- Esp32FirmwareImages.update_parts(image, offset),
+         {:ok, table} <-
+           EsptoolHelper.read_flash_with_size(
+             port,
+             @partition_table_offset,
+             @partition_table_size,
+             false
+           ),
+         {:ok, bootloader} <-
+           EsptoolHelper.read_flash_with_size(
+             port,
+             table["bootloader_offset"],
+             @bootloader_header_size,
+             true
+           ),
+         %{app: {_, _, app}, lib: {_, _, lib}} = parts,
+         :ok <-
+           Esp32FirmwareImages.check_update_layout(
+             table["data"],
+             parts.table,
+             byte_size(app),
+             byte_size(lib)
+           ),
+         {:ok, bootloaders} <-
+           Esp32FirmwareImages.check_bootloader(bootloader["data"], parts.bootloader) do
+      {:ok, %{parts: parts, bootloaders: bootloaders}}
+    end
+  end
+
+  defp confirm(:install, device, image, chip, offset, _plan) do
     [first | rest] = Esp32FirmwareImages.describe(image, offset)
-    warnings = Enum.map(Esp32FirmwareImages.warnings(image, chip), &"Warning: #{&1}")
+    warnings = Esp32FirmwareImages.warnings(image, chip)
 
-    lines =
-      [
-        "",
-        "Erase the flash of #{device["chip_family_name"]} - Port: #{device["port"]} MAC: #{device["mac_address"]}",
-        "and install #{first}" | rest
-      ] ++ warnings ++ ["Continue? [N/y]: "]
+    ask(
+      ["Erase the flash of #{device_line(device)}", "and install #{first}" | rest],
+      warnings,
+      "Erasing and flashing"
+    )
+  end
 
+  defp confirm(:update, device, image, chip, _offset, plan) do
+    installed = EsptoolHelper.installed_version(device)
+
+    summary =
+      Esp32FirmwareImages.update_summary(installed, plan.bootloaders.board, image, plan.parts)
+
+    warnings = Esp32FirmwareImages.warnings(image, chip) ++ List.wrap(plan.bootloaders.warning)
+    ask(["Update AtomVM on #{device_line(device)}" | summary], warnings, "Updating")
+  end
+
+  defp device_line(device) do
+    "#{device["chip_family_name"]} - Port: #{device["port"]} MAC: #{device["mac_address"]}"
+  end
+
+  defp ask(lines, warnings, doing) do
+    lines = ["" | lines] ++ Enum.map(warnings, &"Warning: #{&1}") ++ ["Continue? [N/y]: "]
     confirmation = IO.gets(Enum.join(lines, "\n"))
     input = if is_binary(confirmation), do: String.trim(confirmation), else: ""
 
     if input in ["Y", "y"] do
-      IO.puts("Erasing and flashing")
+      IO.puts(doing)
       :ok
     else
-      IO.puts("Install cancelled.")
+      IO.puts("Cancelled.")
       exit({:shutdown, 0})
     end
+  end
+
+  defp erase(:update, _device), do: true
+
+  defp erase(:install, device) do
+    erased = erase_flash(device)
+    if erased, do: :timer.sleep(3000)
+    erased
+  end
+
+  defp write(:install, device, image, offset, baud, _plan) do
+    flash_image(device, image, offset, baud)
+  end
+
+  defp write(:update, device, _image, _offset, baud, plan) do
+    File.mkdir_p!(@update_dir)
+
+    files =
+      for {offset, name, data} <- [plan.parts.app, plan.parts.lib] do
+        path = Path.join(@update_dir, name)
+        File.write!(path, data)
+        {offset, path}
+      end
+
+    EsptoolHelper.write_flash_parts(device["port"], baud, files)
+  end
+
+  defp banner(:install, device) do
+    IO.puts("""
+
+      Successfully installed AtomVM on #{device_line(device)}
+
+      Your project can now be flashed with:
+        mix atomvm.esp32.flash
+
+    """)
+  end
+
+  defp banner(:update, device) do
+    IO.puts("""
+
+      Successfully updated AtomVM on #{device_line(device)}
+
+      The application in main.avm was kept; a new one can be flashed with:
+        mix atomvm.esp32.flash
+
+    """)
   end
 
   defp check_req_dependency do

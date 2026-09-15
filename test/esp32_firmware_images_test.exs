@@ -748,6 +748,148 @@ defmodule ExAtomVM.Esp32FirmwareImagesTest do
     end
   end
 
+  describe "slice_image/2" do
+    test "cuts the app and the boot library out along the embedded partition table" do
+      assert {:ok, parts} = Images.slice_image(plain_image(), 0x1000)
+      assert parts.table == partition_table_bin()
+      assert {:ok, %{idf_ver: "v5.4.1"}} = Images.bootloader_desc(parts.bootloader)
+      assert parts.app == {0x10000, "factory.bin", app_bytes()}
+      assert parts.lib == {0x30000, "boot.avm", lib_bytes()}
+    end
+
+    test "drops the trailing 0xFF of a slice, which erased flash reads anyway" do
+      image = plain_image(app: app_bytes() <> <<0xFF, 0xFF>>)
+      assert {:ok, %{app: {_, _, app}}} = Images.slice_image(image, 0x1000)
+      assert app == app_bytes()
+    end
+
+    test "rejects an image without the expected layout" do
+      assert Images.slice_image(<<0xE9, 1, 2>>, 0x1000) == {:error, {:bad_image, :truncated}}
+
+      erased = :binary.copy(<<0xFF>>, 0x40000)
+
+      assert Images.slice_image(erased, 0x1000) ==
+               {:error, {:partition_mismatch, {:missing, "factory"}}}
+
+      zeros = :binary.copy(<<0>>, 0x40000)
+
+      assert {:error, {:partition_mismatch, {:unreadable, :image, _}}} =
+               Images.slice_image(zeros, 0x1000)
+
+      image = plain_image(partitions: List.keydelete(partitions(), "boot.avm", 0))
+
+      assert Images.slice_image(image, 0x1000) ==
+               {:error, {:partition_mismatch, {:missing, "boot.avm"}}}
+
+      image = plain_image(lib: <<>>)
+      assert Images.slice_image(image, 0x1000) == {:error, {:bad_image, {:no_data, "boot.avm"}}}
+    end
+  end
+
+  describe "bundle_update_parts/1" do
+    test "takes the parts of a bundle at the offsets FLASH.txt states" do
+      {:ok, bundle} = Images.verify_bundle(bundle(), "b.zip", @stamp)
+      assert {:ok, parts} = Images.bundle_update_parts(bundle)
+      assert parts.bootloader == part_data("bootloader.bin")
+      assert parts.table == part_data("partition-table.bin")
+      assert parts.app == {0x80, "atomvm-esp32.bin", part_data("atomvm-esp32.bin")}
+      assert parts.lib == {0x100, "esp32boot.avm", part_data("esp32boot.avm")}
+    end
+
+    test "slices the image of a bundle of the first format" do
+      flash_txt =
+        flash_txt("esp32s3") |> String.split("Update an existing") |> hd() |> String.trim()
+
+      {:ok, bundle} =
+        Images.verify_bundle(zip(Enum.take(members(flash_txt: flash_txt), 5)), "b.zip", nil)
+
+      assert {:error, {:bad_image, :truncated}} = Images.bundle_update_parts(bundle)
+    end
+  end
+
+  describe "bootloader_desc/1 and compare_idf/2" do
+    test "reads the ESP-IDF version of a bootloader" do
+      assert Images.bootloader_desc(bootloader_bytes("v5.5.4")) == {:ok, %{idf_ver: "v5.5.4"}}
+      assert Images.bootloader_desc(:binary.copy(<<0xE9>>, 0x70)) == :error
+      assert Images.bootloader_desc(<<0xE9, 0, 0>>) == :error
+    end
+
+    test "compares versions with or without the v" do
+      assert Images.compare_idf("v5.5.4", "v5.4.1") == :gt
+      assert Images.compare_idf("5.4.1", "v5.4.1") == :eq
+      assert Images.compare_idf("v5.4", "v5.4.1") == :lt
+      assert Images.compare_idf("v5.5.4", nil) == :unknown
+      assert Images.compare_idf("main", "v5.5.4") == :unknown
+    end
+  end
+
+  describe "check_bootloader/2" do
+    test "refuses a board bootloader newer than the image, warns when unknown" do
+      assert {:ok, %{board: "v5.4.1", image: "v5.5.4", warning: nil}} =
+               Images.check_bootloader(bootloader_bytes("v5.4.1"), bootloader_bytes("v5.5.4"))
+
+      assert {:ok, %{warning: nil}} =
+               Images.check_bootloader(bootloader_bytes("v5.5.4"), bootloader_bytes("v5.5.4"))
+
+      assert {:error, {:bootloader_newer, "v5.5.4", "v5.4.1"}} =
+               Images.check_bootloader(bootloader_bytes("v5.5.4"), bootloader_bytes("v5.4.1"))
+
+      assert {:ok, %{board: nil, image: "v5.5.4", warning: warning}} =
+               Images.check_bootloader(<<0xE9, 0, 0>>, bootloader_bytes("v5.5.4"))
+
+      assert warning =~ "cannot be compared"
+    end
+  end
+
+  describe "check_update_layout/4" do
+    test "requires the factory and boot.avm partitions to match, and the parts to fit" do
+      table = partition_table_bin()
+      assert Images.check_update_layout(table, table, 100, 100) == :ok
+
+      expanded =
+        partition_table_bin(
+          List.keyreplace(partitions(), "main.avm", 0, {"main.avm", 1, 1, 0x40000, 0x3C0000})
+        )
+
+      assert Images.check_update_layout(expanded, table, 100, 100) == :ok
+
+      moved =
+        partition_table_bin(
+          List.keyreplace(partitions(), "factory", 0, {"factory", 0, 0, 0x10000, 0x30000})
+        )
+
+      assert {:error, {:partition_mismatch, {"factory", %{size: 0x30000}, %{size: 0x20000}}}} =
+               Images.check_update_layout(moved, table, 100, 100)
+
+      assert Images.check_update_layout(table, table, 0x20001, 100) ==
+               {:error, {:part_too_large, "factory", 0x20001, 0x20000}}
+
+      assert Images.check_update_layout(table, table, 100, 0x10001) ==
+               {:error, {:part_too_large, "boot.avm", 0x10001, 0x10000}}
+
+      assert {:error, {:partition_mismatch, {:unreadable, :board, _}}} =
+               Images.check_update_layout(:binary.copy(<<0>>, 64), table, 1, 1)
+    end
+  end
+
+  describe "update_summary/4" do
+    test "says what an update replaces with what" do
+      [image] = Images.release_images(factory_release(), :factory)
+
+      {:ok, parts} =
+        Images.bundle_update_parts(elem(Images.verify_bundle(bundle(), "b.zip", @stamp), 1))
+
+      assert Images.update_summary("v0.6.6-dirty", "v5.4.1", image, parts) == [
+               "  from:  v0.6.6-dirty (bootloader ESP-IDF v5.4.1)",
+               "  to:    #{@stem} (nightly build nightly-0.7, Erlang only), build #{@stamp}",
+               "  writes atomvm-esp32.bin at 0x80 and esp32boot.avm at 0x100",
+               "The bootloader, the partition table, NVS and main.avm are kept."
+             ]
+
+      assert ["  from:  unknown build" | _] = Images.update_summary(nil, nil, image, parts)
+    end
+  end
+
   describe "select_release_image/3" do
     setup do
       %{images: Images.release_images(release("v0.7.0-alpha.1", prerelease: true))}
@@ -813,6 +955,17 @@ defmodule ExAtomVM.Esp32FirmwareImagesTest do
             {:chip_mismatch, "x.img", "esp32", "ESP32-S3"},
             {:flash_offset_conflict, "x.img", 0x1000, 0x0},
             {:unknown_flash_offset, "esp32x9"},
+            :not_installed,
+            {:bad_image, :truncated},
+            {:bad_image, {:no_data, "factory"}},
+            {:partition_mismatch, {:unreadable, :board, :invalid_partition_table}},
+            {:partition_mismatch, {:missing, "boot.avm"}},
+            {:partition_mismatch,
+             {"factory", %{offset: 0x10000, size: 0x30000}, %{offset: 0x10000, size: 0x20000}}},
+            {:part_too_large, "factory", 0x20001, 0x20000},
+            {:bootloader_newer, "v5.5.4", "v5.4.1"},
+            {:pythonx_error, "Pythonx error occurred: x"},
+            :flash_read_failed,
             :something_else
           ] do
         message = Images.format_error(reason)
@@ -999,6 +1152,63 @@ defmodule ExAtomVM.Esp32FirmwareImagesTest do
   end
 
   defp bundle, do: zip(members())
+
+  defp part_data(name) do
+    {^name, _offset, data} = List.keyfind(parts(), name, 0)
+    data
+  end
+
+  defp partitions do
+    [
+      {"nvs", 1, 2, 0x9000, 0x6000},
+      {"phy_init", 1, 1, 0xF000, 0x1000},
+      {"factory", 0, 0, 0x10000, 0x20000},
+      {"boot.avm", 1, 1, 0x30000, 0x10000},
+      {"main.avm", 1, 1, 0x40000, 0x10000}
+    ]
+  end
+
+  defp partition_table_bin(partitions \\ partitions()) do
+    entries =
+      for {name, type, subtype, offset, size} <- partitions, into: <<>> do
+        label = String.pad_trailing(name, 16, <<0>>)
+
+        <<0xAA, 0x50, type, subtype, offset::little-32, size::little-32, label::binary,
+          0::little-32>>
+      end
+
+    md5 = <<0xEB, 0xEB>> <> :binary.copy(<<0xFF>>, 14) <> :crypto.hash(:md5, entries)
+    entries <> md5 <> :binary.copy(<<0xFF>>, 0xC00 - byte_size(entries) - 32)
+  end
+
+  defp bootloader_bytes(idf_ver) do
+    <<0xE9, 3, 2, 0x2F>> <>
+      :binary.copy(<<0>>, 0x1C) <>
+      <<0x50, 0, 0, 0, 1::little-32>> <>
+      String.pad_trailing(idf_ver, 32, <<0>>) <>
+      :binary.copy(<<0>>, 24 + 16) <>
+      :binary.copy(<<0xAB>>, 64)
+  end
+
+  defp app_bytes, do: <<0xE9>> <> :binary.copy(<<0xCD>>, 999)
+  defp lib_bytes, do: "#!/usr/bin/env AtomVM\n" <> :binary.copy(<<0x42>>, 500) <> "end\0"
+
+  defp plain_image(opts \\ []) do
+    base = 0x1000
+    partitions = Keyword.get(opts, :partitions, partitions())
+    app = Keyword.get(opts, :app, app_bytes())
+    lib = Keyword.get(opts, :lib, lib_bytes())
+
+    at = fn image, offset, data ->
+      image <> :binary.copy(<<0xFF>>, offset - base - byte_size(image)) <> data
+    end
+
+    <<>>
+    |> at.(base, bootloader_bytes("v5.4.1"))
+    |> at.(0x8000, partition_table_bin(partitions))
+    |> at.(0x10000, app)
+    |> at.(0x30000, lib)
+  end
 
   defp zip(members) do
     entries = Enum.map(members, fn {name, data} -> {String.to_charlist(name), data} end)

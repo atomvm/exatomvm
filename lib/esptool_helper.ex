@@ -457,6 +457,17 @@ defmodule ExAtomVM.EsptoolHelper do
   def format_atomvm_status(_), do: "❌"
 
   @doc """
+  Writes files at flash offsets, erasing nothing else, through the same
+  esptool path as flashing an image.
+  """
+  def write_flash_parts(port, baud, parts) do
+    files =
+      Enum.flat_map(parts, fn {offset, path} -> ["0x" <> Integer.to_string(offset, 16), path] end)
+
+    flash_pythonx(["--chip", "auto", "--port", port, "--baud", baud, "write-flash"] ++ files)
+  end
+
+  @doc """
   The version string of the AtomVM build on a device, or nil without one.
   """
   def installed_version(%{"atomvm_installed" => true, "build_info" => [version | _]}) do

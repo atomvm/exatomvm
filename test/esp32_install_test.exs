@@ -9,9 +9,11 @@ defmodule Mix.Tasks.Atomvm.Esp32.InstallTest do
     end
   end
 
-  test "rejects --list-images together with an image or a version" do
-    assert_raise Mix.Error, "--list-images cannot be combined with --image or --version", fn ->
-      Install.run(["--list-images", "--version", "v0.6.6"])
+  test "rejects --list-images together with an image, a version or --update" do
+    message = "--list-images cannot be combined with --image, --version or --update"
+
+    for args <- [["--version", "v0.6.6"], ["--image", "x.img"], ["--update"]] do
+      assert_raise Mix.Error, message, fn -> Install.run(["--list-images" | args]) end
     end
   end
 
