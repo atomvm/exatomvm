@@ -8,4 +8,12 @@ defmodule Mix.Tasks.Atomvm.Esp32.InstallTest do
       Install.run(["--image", "atomvm.img", "--version", "v0.7.0-alpha.1"])
     end
   end
+
+  test "rejects an image that is neither a file nor a published image name" do
+    for arg <- ["./missing.img", "not-an-image.uf2", "atomvm-esp32s3-elixir.img"] do
+      assert_raise Mix.Error, ~r/^--image must be an image file or the name/, fn ->
+        Install.run(["--image", arg])
+      end
+    end
+  end
 end

@@ -5,6 +5,21 @@ defmodule ExAtomVM.Esp32FirmwareImagesTest do
 
   @releases "https://api.github.com/repos/atomvm/atomvm/releases"
 
+  @stem "AtomVM-esp32s3-atomgl-ipv6-libsodium-psram-nightly-0.7"
+  @stamp "nightly-0.7+20260915.02e1603"
+
+  @factory_body """
+  Rolling nightly build of AtomVM `release-0.7` for ESP32-family chips, 2026-09-15.
+
+  - AtomVM: `release-0.7` @ [`02e1603`](https://github.com/atomvm/AtomVM/commit/02e1603)
+  - ESP-IDF v5.5.4 (container `espressif/idf:v5.5.4`)
+  - Build stamp: `nightly-0.7+20260915.02e1603`
+
+  | Image | Optimization | Size | SHA-256 | ELF SHA-256 | Status |
+  |---|---|---|---|---|---|
+  | `AtomVM-esp32s3-atomgl-ipv6-libsodium-psram-nightly-0.7.zip` | -O2 | 11288674 | `688f3c59` | `4539ff158` | fresh |
+  """
+
   describe "release_api_url/1" do
     test "uses the latest release endpoint when no version is specified" do
       assert Images.release_api_url(nil) == @releases <> "/latest"
@@ -223,6 +238,258 @@ defmodule ExAtomVM.Esp32FirmwareImagesTest do
     end
   end
 
+  describe "stamp_from_body/1" do
+    test "reads the build stamp of the factory release notes" do
+      assert Images.stamp_from_body(@factory_body) == @stamp
+      assert Images.stamp_from_body("no stamp here") == nil
+      assert Images.stamp_from_body(nil) == nil
+    end
+  end
+
+  describe "release_images/2 on the factory" do
+    test "gives a bundle the build stamp of the release notes" do
+      assert [image] = Images.release_images(factory_release(), :factory)
+
+      assert %{
+               source: :factory,
+               kind: :zip,
+               channel: :nightly,
+               tag: "nightly-0.7",
+               stamp: @stamp,
+               published_at: "2026-09-15",
+               size: 11_288_674
+             } = image
+    end
+  end
+
+  describe "parse_flash_txt/1" do
+    test "reads the header and the parts" do
+      assert {:ok, flash} = Images.parse_flash_txt(flash_txt("esp32s3"))
+
+      assert flash == %{
+               image: "#{@stem}.img",
+               chip: "esp32s3",
+               build: @stamp,
+               idf: "5.5.4",
+               flash_offset: 0x0,
+               app_offset: 0x250000,
+               parts: [
+                 %{name: "bootloader.bin", offset: 0x0},
+                 %{name: "partition-table.bin", offset: 0x40},
+                 %{name: "atomvm-esp32.bin", offset: 0x80},
+                 %{name: "esp32boot.avm", offset: 0x100}
+               ]
+             }
+    end
+
+    test "accepts the first bundle format, which listed no parts" do
+      text = """
+      AtomVM firmware image: x.img
+      Chip: esp32
+      Flash offset: 0x1000
+      Application partition (main.avm): 0x250000
+
+      Flash:
+        esptool.py --chip esp32 write_flash \\
+          0x1000 x.img
+      """
+
+      assert {:ok, %{chip: "esp32", flash_offset: 0x1000, build: nil, parts: []}} =
+               Images.parse_flash_txt(text)
+    end
+
+    test "requires the chip and the flash offset" do
+      assert Images.parse_flash_txt("Flash offset: 0x0\n") == {:error, {:bad_flash_txt, :chip}}
+      assert Images.parse_flash_txt("Chip: esp32\n") == {:error, {:bad_flash_txt, :flash_offset}}
+    end
+  end
+
+  describe "bundle_stamp/1" do
+    test "reads CONFIG_APP_PROJECT_VER" do
+      assert Images.bundle_stamp(sdkconfig()) == @stamp
+      assert Images.bundle_stamp("CONFIG_IDF_TARGET=\"esp32s3\"\n") == nil
+      assert Images.bundle_stamp(nil) == nil
+    end
+  end
+
+  describe "verify_bundle/3" do
+    test "accepts a factory bundle and returns its image, parts and stamp" do
+      assert {:ok, bundle} = Images.verify_bundle(bundle(), "b.zip", @stamp)
+      assert bundle.stem == @stem
+      assert bundle.stamp == @stamp
+      assert bundle.flash.chip == "esp32s3"
+      assert bundle.image == image_bytes()
+      assert bundle.partitions_csv == partitions_csv()
+
+      assert bundle.parts ==
+               Map.new(parts(), fn {name, _offset, data} -> {name, data} end)
+    end
+
+    test "accepts the first bundle format, without parts and SHA256SUMS" do
+      flash_txt =
+        flash_txt("esp32s3") |> String.split("Update an existing") |> hd() |> String.trim()
+
+      members = Enum.take(members(flash_txt: flash_txt), 5)
+
+      assert {:ok, %{parts: parts, stamp: @stamp}} =
+               Images.verify_bundle(zip(members), "b.zip", nil)
+
+      assert parts == %{}
+    end
+
+    test "rejects what is not a bundle" do
+      assert {:error, {:bad_bundle, "b.zip", :not_a_zip}} =
+               Images.verify_bundle("garbage", "b.zip", nil)
+
+      assert {:error, {:bad_bundle, "b.zip", :no_image}} =
+               Images.verify_bundle(zip([{"FLASH.txt", "x"}]), "b.zip", nil)
+
+      assert {:error, {:bad_bundle, "b.zip", {:missing_members, ["FLASH.txt"]}}} =
+               Images.verify_bundle(zip([{"x.img", "x"}]), "b.zip", nil)
+
+      assert {:error, {:bad_bundle, "b.zip", {:missing_members, ["atomvm-esp32.bin"]}}} =
+               Images.verify_bundle(
+                 zip(List.keydelete(members(), "atomvm-esp32.bin", 0)),
+                 "b.zip",
+                 nil
+               )
+    end
+
+    test "rejects a checksum mismatch" do
+      sidecar = "#{String.duplicate("0", 64)}  #{@stem}.img\n"
+
+      members =
+        List.keyreplace(members(), "#{@stem}.img.sha256", 0, {"#{@stem}.img.sha256", sidecar})
+
+      assert {:error, {:bad_bundle, "b.zip", {:sha256_mismatch, "#{@stem}.img"}}} =
+               Images.verify_bundle(zip(members), "b.zip", nil)
+
+      members =
+        List.keyreplace(members(), "sdkconfig", 0, {"sdkconfig", sdkconfig() <> "# edited\n"})
+
+      assert {:error, {:bad_bundle, "b.zip", {:sha256_mismatch, "sdkconfig"}}} =
+               Images.verify_bundle(zip(members), "b.zip", nil)
+    end
+
+    test "rejects a part that is not the image's bytes at its offset" do
+      parts = List.keyreplace(parts(), "atomvm-esp32.bin", 0, {"atomvm-esp32.bin", 0x80, "other"})
+
+      assert {:error, {:bad_bundle, "b.zip", {:part_mismatch, "atomvm-esp32.bin", 0x80}}} =
+               Images.verify_bundle(zip(members(parts: parts)), "b.zip", nil)
+    end
+
+    test "rejects a build stamp other than the expected one" do
+      assert {:error, {:stamp_mismatch, "b.zip", "nightly-0.7+20260916.abcdef0", @stamp}} =
+               Images.verify_bundle(bundle(), "b.zip", "nightly-0.7+20260916.abcdef0")
+    end
+
+    test "rejects a bundle built for another chip than its name says" do
+      assert {:error, {:bad_bundle, "b.zip", {:chip, "esp32", "esp32s3"}}} =
+               Images.verify_bundle(zip(members(chip: "esp32")), "b.zip", nil)
+    end
+  end
+
+  describe "compatible?/2 and image_chip/1" do
+    test "compares the base chip of the image with the connected one" do
+      {:ok, image} = Images.parse_name("AtomVM-esp32p4_pre_c6-elixir-v0.7.0-alpha.1.img")
+      assert Images.compatible?(image, "esp32p4") == true
+      assert Images.compatible?(image, "esp32s3") == false
+      assert Images.image_chip(image) == "esp32p4"
+
+      local = Images.local_image("/tmp/kiosk.img")
+      assert Images.compatible?(local, "esp32s3") == :unknown
+      assert Images.image_chip(local) == nil
+
+      bundle = Map.put(local, :flash, %{chip: "esp32s3", flash_offset: 0})
+      assert Images.compatible?(bundle, "esp32s3") == true
+    end
+  end
+
+  describe "flash_offset_for/2" do
+    test "takes the bundle's offset, the chip's, and needs them to agree" do
+      {:ok, image} = Images.parse_name("AtomVM-esp32-elixir-v0.6.6.img")
+      assert Images.flash_offset_for(image, "esp32") == {:ok, 0x1000}
+      assert Images.flash_offset_for(image, "esp32c5") == {:ok, 0x2000}
+      assert Images.flash_offset_for(image, "esp32s3") == {:ok, 0x0}
+
+      assert Images.flash_offset_for(image, "esp32x9") ==
+               {:error, {:unknown_flash_offset, "esp32x9"}}
+
+      bundle = Map.put(image, :flash, %{chip: "esp32", flash_offset: 0x1000})
+      assert Images.flash_offset_for(bundle, "esp32") == {:ok, 0x1000}
+      assert Images.flash_offset_for(bundle, "esp32x9") == {:ok, 0x1000}
+
+      assert Images.flash_offset_for(bundle, "esp32s3") ==
+               {:error, {:flash_offset_conflict, "AtomVM-esp32-elixir-v0.6.6.img", 0x1000, 0x0}}
+    end
+  end
+
+  describe "classify_image_arg/1" do
+    test "tells a file from a published image name" do
+      assert Images.classify_image_arg("mix.exs") == {:path, "mix.exs"}
+
+      assert {:name, %{name: "AtomVM-esp32s3-elixir-v0.6.6", version: "v0.6.6"}} =
+               Images.classify_image_arg("AtomVM-esp32s3-elixir-v0.6.6")
+
+      assert {:name, %{name: @stem, channel: :nightly}} =
+               Images.classify_image_arg(@stem <> ".zip")
+
+      assert Images.classify_image_arg("atomvm-esp32s3-elixir.img") == :error
+      assert Images.classify_image_arg("./missing.img") == :error
+    end
+  end
+
+  describe "local_image/1" do
+    test "parses the name when it follows the convention" do
+      path = "_build/atomvm_images/atomvm-esp32s3-elixir.img"
+
+      assert %{chip: "esp32s3", elixir?: true, channel: :local, source: :local, path: ^path} =
+               Images.local_image(path)
+
+      assert %{name: "kiosk", file: "kiosk.img", chip: nil, elixir?: nil, channel: :local} =
+               Images.local_image("/tmp/kiosk.img")
+    end
+  end
+
+  describe "describe/2 and warnings/2" do
+    test "describe a nightly bundle and warn about its missing Elixir support" do
+      [image] = Images.release_images(factory_release(), :factory)
+
+      assert Images.describe(image, 0) == [
+               "#{@stem} (nightly build nightly-0.7, Erlang only)",
+               "  build:    #{@stamp}",
+               "  features: atomgl, ipv6, libsodium, psram",
+               "  offset:   0x0"
+             ]
+
+      assert [warning] = Images.warnings(image, "esp32s3")
+      assert warning =~ "no Elixir support"
+    end
+
+    test "describe a release image with nothing to warn about" do
+      {:ok, image} = Images.parse_name("AtomVM-esp32s3-elixir-v0.6.6.img")
+
+      assert Images.describe(image, 0x1000) == [
+               "AtomVM-esp32s3-elixir-v0.6.6 (stable release v0.6.6, Elixir)",
+               "  offset:   0x1000"
+             ]
+
+      assert Images.warnings(image, "esp32s3") == []
+    end
+
+    test "warn when the chip of a local image is not known" do
+      image = Images.local_image("/tmp/kiosk.img")
+
+      assert Images.describe(image, 0) == [
+               "kiosk (local image, unknown flavor)",
+               "  offset:   0x0"
+             ]
+
+      assert [warning] = Images.warnings(image, "esp32s3")
+      assert warning =~ "not known"
+    end
+  end
+
   describe "select_release_image/3" do
     setup do
       %{images: Images.release_images(release("v0.7.0-alpha.1", prerelease: true))}
@@ -269,6 +536,22 @@ defmodule ExAtomVM.Esp32FirmwareImagesTest do
             {:http, "https://api.github.com/x", {:transport, "nxdomain"}},
             {:size_mismatch, "x.img", 10, 9},
             {:digest_mismatch, "x.img", "aa", "bb"},
+            {:release_not_found, :factory, "nightly-0.8"},
+            {:unknown_image, "AtomVM-esp32-v9.9.9", :atomvm},
+            {:not_cached, "AtomVM-esp32-v9.9.9"},
+            {:bad_bundle, "b.zip", :not_a_zip},
+            {:bad_bundle, "b.zip", :no_image},
+            {:bad_bundle, "b.zip", :unreadable},
+            {:bad_bundle, "b.zip", {:missing_members, ["FLASH.txt", "sdkconfig"]}},
+            {:bad_bundle, "b.zip", {:bad_flash_txt, :chip}},
+            {:bad_bundle, "b.zip", {:sha256_mismatch, "x.img"}},
+            {:bad_bundle, "b.zip", {:part_mismatch, "atomvm-esp32.bin", 0x10000}},
+            {:bad_bundle, "b.zip", {:chip, "esp32", "esp32s3"}},
+            {:bad_bundle, "b.zip", :other},
+            {:stamp_mismatch, "b.zip", "a+1", "a+2"},
+            {:chip_mismatch, "x.img", "esp32", "ESP32-S3"},
+            {:flash_offset_conflict, "x.img", 0x1000, 0x0},
+            {:unknown_flash_offset, "esp32x9"},
             :something_else
           ] do
         message = Images.format_error(reason)
@@ -306,6 +589,126 @@ defmodule ExAtomVM.Esp32FirmwareImagesTest do
       "body" => "",
       "assets" => List.flatten(images) ++ others
     }
+  end
+
+  defp factory_release do
+    %{
+      "tag_name" => "nightly-0.7",
+      "prerelease" => false,
+      "draft" => false,
+      "published_at" => "2026-09-15T22:35:19Z",
+      "body" => @factory_body,
+      "assets" => [
+        %{
+          "name" => "#{@stem}.zip",
+          "size" => 11_288_674,
+          "browser_download_url" =>
+            "https://github.com/atomvm/atomvm-esp32-firmware-factory/releases/download/nightly-0.7/#{@stem}.zip",
+          "digest" => "sha256:688f3c59753366405f33e09ad45fd1eb5ef6f3f98a60a8586dfd9bc0c4ab65c0",
+          "updated_at" => "2026-09-15T22:35:04Z",
+          "content_type" => "application/zip"
+        }
+      ]
+    }
+  end
+
+  defp parts do
+    [
+      {"bootloader.bin", 0x0, <<0xE9, 1, 2, 3>> <> :binary.copy(<<0xAB>>, 20)},
+      {"partition-table.bin", 0x40, <<0xAA, 0x50>> <> :binary.copy(<<0x01>>, 30)},
+      {"atomvm-esp32.bin", 0x80, <<0xE9>> <> :binary.copy(<<0xCD>>, 63)},
+      {"esp32boot.avm", 0x100, "#!/usr/bin/env AtomVM\n" <> :binary.copy(<<0x42>>, 10)}
+    ]
+  end
+
+  defp image_bytes(parts \\ parts()) do
+    Enum.reduce(parts, <<>>, fn {_name, offset, data}, image ->
+      image <> :binary.copy(<<0xFF>>, offset - byte_size(image)) <> data
+    end)
+  end
+
+  defp sdkconfig do
+    "CONFIG_IDF_TARGET=\"esp32s3\"\nCONFIG_APP_PROJECT_VER=\"#{@stamp}\"\nCONFIG_SPIRAM=y\n"
+  end
+
+  defp partitions_csv do
+    "# Name, Type, SubType, Offset, Size\nnvs, data, nvs, 0x9000, 0x6000,\nmain.avm, data, phy, 0x250000, 0x100000\n"
+  end
+
+  defp flash_txt(chip) do
+    """
+    AtomVM firmware image: #{@stem}.img
+    Chip: #{chip}
+    AtomVM build: #{@stamp}
+    ESP-IDF: 5.5.4
+    Flash offset: 0x0
+    Application partition (main.avm): 0x250000
+
+    Install
+    -------
+
+    Flash:
+      esptool.py --chip #{chip} --port /dev/ttyUSB0 --baud 921600 \\
+        --before default_reset --after hard_reset write_flash \\
+        0x0 #{@stem}.img
+
+    Update an existing AtomVM installation
+    --------------------------------------
+
+      esptool.py --chip #{chip} --port /dev/ttyUSB0 --baud 921600 --after no_reset \\
+        verify_flash 0x40 partition-table.bin && \\
+      esptool.py --chip #{chip} --port /dev/ttyUSB0 --baud 921600 \\
+        --before default_reset --after hard_reset write_flash \\
+        0x80 atomvm-esp32.bin 0x100 esp32boot.avm
+
+    Contents
+    --------
+
+    The binaries are the parts of the image, byte for byte, at these offsets:
+      0x0       bootloader.bin
+      0x40      partition-table.bin
+      0x80      atomvm-esp32.bin
+      0x100     esp32boot.avm
+
+    Debugging
+    ---------
+
+    atomvm-esp32.elf holds the symbols of this image.
+    """
+  end
+
+  defp members(opts \\ []) do
+    parts = Keyword.get(opts, :parts, parts())
+    image = image_bytes()
+
+    summed =
+      [
+        {"#{@stem}.img", image},
+        {"sdkconfig", sdkconfig()},
+        {"partitions.csv", partitions_csv()},
+        {"FLASH.txt",
+         Keyword.get_lazy(opts, :flash_txt, fn ->
+           flash_txt(Keyword.get(opts, :chip, "esp32s3"))
+         end)}
+      ] ++
+        for({name, _offset, data} <- parts, do: {name, data}) ++
+        [{"atomvm-esp32.elf", "elf"}, {"atomvm-esp32.map", "map"}]
+
+    sha = fn data -> :crypto.hash(:sha256, data) |> Base.encode16(case: :lower) end
+    sidecar = {"#{@stem}.img.sha256", "#{sha.(image)}  #{@stem}.img\n"}
+
+    sums =
+      {"SHA256SUMS", Enum.map_join(summed, fn {name, data} -> "#{sha.(data)}  #{name}\n" end)}
+
+    [hd(summed), sidecar | tl(summed)] ++ [sums]
+  end
+
+  defp bundle, do: zip(members())
+
+  defp zip(members) do
+    entries = Enum.map(members, fn {name, data} -> {String.to_charlist(name), data} end)
+    {:ok, {_name, zip}} = :zip.create(~c"b.zip", entries, [:memory])
+    zip
   end
 
   defp rolling_release(tag, name) do

@@ -5,7 +5,21 @@ defmodule ExAtomVM.Esp32FirmwareImages do
   @compile {:no_warn_undefined, Req}
 
   @atomvm_releases_url "https://api.github.com/repos/atomvm/atomvm/releases"
+  @factory_releases_url "https://api.github.com/repos/atomvm/atomvm-esp32-firmware-factory/releases"
   @cache_dir "firmware_images"
+
+  @flash_offsets %{
+    "esp32" => 0x1000,
+    "esp32s2" => 0x1000,
+    "esp32s3" => 0x0,
+    "esp32c2" => 0x0,
+    "esp32c3" => 0x0,
+    "esp32c5" => 0x2000,
+    "esp32c6" => 0x0,
+    "esp32c61" => 0x0,
+    "esp32h2" => 0x0,
+    "esp32p4" => 0x2000
+  }
 
   @chip_regex ~r/^esp32([a-z]\d+)?(_[a-z0-9]+)*$/
   @stable_regex ~r/^v\d+\.\d+\.\d+$/
@@ -100,7 +114,7 @@ defmodule ExAtomVM.Esp32FirmwareImages do
   @doc """
   The images among the assets of a GitHub release, as returned by the API.
   """
-  def release_images(%{"tag_name" => tag} = release) do
+  def release_images(%{"tag_name" => tag} = release, source \\ :atomvm) do
     assets = release["assets"] || []
 
     sidecars =
@@ -113,7 +127,7 @@ defmodule ExAtomVM.Esp32FirmwareImages do
         String.ends_with?(name, [".img", ".zip"]),
         {:ok, image} <- [parse_name(name)] do
       Map.merge(image, %{
-        source: :atomvm,
+        source: source,
         tag: tag,
         url: asset["browser_download_url"],
         size: asset["size"],
@@ -121,7 +135,7 @@ defmodule ExAtomVM.Esp32FirmwareImages do
         sha256: digest_from_asset(asset),
         sha256_url: sidecars[name],
         channel: release_channel(image.channel, release["prerelease"]),
-        stamp: image.stamp || rolling_stamp(image, asset)
+        stamp: image.stamp || rolling_stamp(image, release, asset)
       })
     end
   end
@@ -132,27 +146,91 @@ defmodule ExAtomVM.Esp32FirmwareImages do
   defp release_channel(:stable, true), do: :prerelease
   defp release_channel(channel, _prerelease), do: channel
 
-  # The assets of a rolling tag keep their names from one build to the next,
-  # so a plain image there is told apart by the day it was uploaded. A bundle
-  # carries its own build stamp, read once it is downloaded.
-  defp rolling_stamp(%{channel: :nightly, kind: :img, version: version}, asset) do
+  # The assets of a rolling tag keep their names from one build to the next.
+  # A bundle carries its build stamp, which the factory also writes in the
+  # release notes; a plain image is told apart by the day it was uploaded.
+  defp rolling_stamp(%{channel: :nightly, kind: :zip}, release, _asset) do
+    stamp_from_body(release["body"])
+  end
+
+  defp rolling_stamp(%{channel: :nightly, kind: :img, version: version}, _release, asset) do
     case date(asset["updated_at"]) do
       nil -> nil
       date -> version <> "+" <> String.replace(date, "-", "")
     end
   end
 
-  defp rolling_stamp(_image, _asset), do: nil
+  defp rolling_stamp(_image, _release, _asset), do: nil
 
   @doc """
-  Fetches a release of the AtomVM repository, the latest stable one when the
-  tag is nil.
+  The build stamp the factory writes in its release notes.
   """
-  def fetch_release(:atomvm, tag) do
-    case fetch_json(release_api_url(tag)) do
+  def stamp_from_body(body) when is_binary(body) do
+    case Regex.run(~r/Build stamp: `([^`]+)`/, body) do
+      [_, stamp] -> stamp
+      nil -> nil
+    end
+  end
+
+  def stamp_from_body(_body), do: nil
+
+  @doc """
+  Fetches a release of a source, the latest one when the tag is nil.
+  """
+  def fetch_release(source, tag) do
+    case fetch_json(releases_url(source, tag)) do
       {:ok, release} -> {:ok, release}
-      {:error, {:http, _url, {:status, 404}}} -> {:error, {:release_not_found, :atomvm, tag}}
+      {:error, {:http, _url, {:status, 404}}} -> {:error, {:release_not_found, source, tag}}
       error -> error
+    end
+  end
+
+  defp releases_url(:atomvm, tag), do: release_api_url(tag)
+  defp releases_url(:factory, nil), do: @factory_releases_url <> "/latest"
+
+  defp releases_url(:factory, tag) do
+    @factory_releases_url <> "/tags/" <> URI.encode(tag, &URI.char_unreserved?/1)
+  end
+
+  @doc """
+  What `--image` names: a file, or a published image to fetch by name.
+  """
+  def classify_image_arg(arg) do
+    if File.regular?(arg) do
+      {:path, arg}
+    else
+      case parse_name(arg) do
+        {:ok, %{version: version} = image} when is_binary(version) -> {:name, image}
+        _ -> :error
+      end
+    end
+  end
+
+  @doc """
+  Finds a named image on the source its version belongs to: the factory for
+  a nightly channel, the AtomVM releases otherwise. Offline, a cached copy.
+  """
+  def resolve(%{name: name, version: version, channel: channel}) do
+    source = if channel == :nightly, do: :factory, else: :atomvm
+
+    case fetch_release(source, version) do
+      {:ok, release} ->
+        release
+        |> release_images(source)
+        |> Enum.find(&(String.downcase(&1.name) == String.downcase(name)))
+        |> case do
+          nil -> {:error, {:unknown_image, name, source}}
+          image -> {:ok, image}
+        end
+
+      {:error, {:release_not_found, _source, _tag}} ->
+        {:error, {:unknown_image, name, source}}
+
+      {:error, {:http, _url, _reason} = reason} ->
+        case find_cached(name) do
+          [image | _] -> {:ok, image}
+          [] -> {:error, reason}
+        end
     end
   end
 
@@ -165,7 +243,7 @@ defmodule ExAtomVM.Esp32FirmwareImages do
   end
 
   defp fetch_binary(url) do
-    case Req.get(url, raw: true) do
+    case Req.get(url, raw: true, redirect_log_level: false) do
       {:ok, %{status: 200, body: body}} when is_binary(body) -> {:ok, body}
       {:ok, %{status: status}} -> {:error, {:http, url, {:status, status}}}
       {:error, exception} -> {:error, {:http, url, {:transport, Exception.message(exception)}}}
@@ -215,9 +293,42 @@ defmodule ExAtomVM.Esp32FirmwareImages do
   @doc """
   Makes sure the image is in the cache, downloading and verifying it when it
   is not; `:log` is called with progress messages. Returns the image with its
-  `:path`, and whether it was `:cached` already or `:downloaded` now.
+  `:path`, and whether it was `:cached` already or `:downloaded` now. A bundle
+  is cached under its build stamp, with its image extracted next to it.
   """
-  def ensure_cached(image, opts \\ []) do
+  def ensure_cached(image, opts \\ [])
+
+  def ensure_cached(%{kind: :zip} = image, opts) do
+    log = Keyword.get(opts, :log, fn _message -> :ok end)
+    path = image.stamp && Path.join(cache_dir(), cached_file_name(image))
+
+    if path && File.exists?(path) do
+      log.("Using cached #{Path.relative_to_cwd(path)}")
+
+      with {:ok, image} <- load_bundle(image, path) do
+        {:ok, image, :cached}
+      end
+    else
+      log.("Downloading #{image.file}, may take a while...")
+
+      with {:ok, data, checked} <- download_verified(image),
+           {:ok, bundle} <- verify_bundle(data, image.file, image.stamp) do
+        if checked == :unverified do
+          log.(
+            "Warning: no checksum is published for #{image.file}, the download was not verified"
+          )
+        end
+
+        image = %{image | stamp: bundle.stamp || image.stamp}
+        path = Path.join(cache_dir(), cached_file_name(image))
+        write_atomically(path, data)
+        write_atomically(bundle_image_path(path), bundle.image)
+        {:ok, with_bundle(image, path, bundle), :downloaded}
+      end
+    end
+  end
+
+  def ensure_cached(image, opts) do
     log = Keyword.get(opts, :log, fn _message -> :ok end)
     path = Path.join(cache_dir(), cached_file_name(image))
 
@@ -238,6 +349,326 @@ defmodule ExAtomVM.Esp32FirmwareImages do
         {:ok, Map.put(image, :path, path), :downloaded}
       end
     end
+  end
+
+  defp load_bundle(image, path) do
+    with {:ok, bundle} <- verify_bundle(File.read!(path), Path.basename(path), image.stamp) do
+      img_path = bundle_image_path(path)
+      if not File.exists?(img_path), do: write_atomically(img_path, bundle.image)
+      {:ok, with_bundle(%{image | stamp: bundle.stamp || image.stamp}, path, bundle)}
+    end
+  end
+
+  defp with_bundle(image, path, bundle) do
+    Map.merge(image, %{path: path, img_path: bundle_image_path(path), flash: bundle.flash})
+  end
+
+  defp bundle_image_path(zip_path), do: String.replace_suffix(zip_path, ".zip", ".img")
+
+  @doc """
+  An image file given by the user: parsed from its name when it follows the
+  naming convention, taken as is otherwise.
+  """
+  def local_image(path) do
+    file = Path.basename(path)
+
+    image =
+      case parse_name(file) do
+        {:ok, image} ->
+          image
+
+        {:error, _reason} ->
+          %{
+            name: String.replace_suffix(file, ".img", ""),
+            file: file,
+            kind: :img,
+            chip: nil,
+            base_chip: nil,
+            elixir?: nil,
+            features: [],
+            version: nil,
+            channel: :local,
+            stamp: nil
+          }
+      end
+
+    Map.merge(image, %{source: :local, path: path})
+  end
+
+  @doc """
+  A bundle file given by the user: verified, its image extracted into the
+  cache under the bundle's build stamp.
+  """
+  def local_bundle(path) do
+    file = Path.basename(path)
+
+    with {:ok, bundle} <- verify_bundle(File.read!(path), file, nil) do
+      image = %{local_image(String.replace_suffix(path, ".zip", ".img")) | kind: :zip, file: file}
+      image = %{image | stamp: bundle.stamp, chip: image.chip || bundle.flash.chip}
+      img_path = Path.join(cache_dir(), bundle_image_path(cached_file_name(image)))
+      if not File.exists?(img_path), do: write_atomically(img_path, bundle.image)
+      {:ok, Map.merge(image, %{path: path, img_path: img_path, flash: bundle.flash})}
+    end
+  end
+
+  def image_path(image), do: Map.get(image, :img_path) || image.path
+
+  def bundle_members(zip) do
+    case :zip.list_dir(zip) do
+      {:ok, entries} ->
+        {:ok, for({:zip_file, name, _, _, _, _} <- entries, do: List.to_string(name))}
+
+      {:error, _reason} ->
+        :error
+    end
+  end
+
+  def bundle_extract(zip, names) do
+    case :zip.unzip(zip, [:memory, {:file_list, Enum.map(names, &String.to_charlist/1)}]) do
+      {:ok, members} ->
+        {:ok, Map.new(members, fn {name, data} -> {List.to_string(name), data} end)}
+
+      {:error, _reason} ->
+        :error
+    end
+  end
+
+  @doc """
+  Checks a bundle as the factory publishes it: the image with its .sha256,
+  sdkconfig, partitions.csv and FLASH.txt, the parts of the image named in
+  FLASH.txt, and SHA256SUMS covering them. The parts must be the image's
+  bytes at their offsets, and the build stamp must be the expected one when
+  given. Debug members are not read.
+  """
+  def verify_bundle(zip, file, expected_stamp) do
+    with {:ok, names} <- bundle_members(zip) |> bad_bundle(file, :not_a_zip),
+         {:ok, img_name} <- bundle_image_name(names) |> bad_bundle(file, :no_image),
+         :ok <- members_present(names, ["FLASH.txt"]) |> bad_bundle(file),
+         {:ok, %{"FLASH.txt" => flash_txt}} <-
+           bundle_extract(zip, ["FLASH.txt"]) |> bad_bundle(file, :unreadable),
+         {:ok, flash} <- parse_flash_txt(flash_txt) |> bad_bundle(file),
+         part_names = Enum.map(flash.parts, & &1.name),
+         summed = [img_name, "sdkconfig", "partitions.csv", "FLASH.txt" | part_names],
+         wanted = [img_name <> ".sha256" | summed],
+         :ok <- members_present(names, wanted) |> bad_bundle(file),
+         sums = if("SHA256SUMS" in names, do: ["SHA256SUMS"], else: []),
+         {:ok, members} <- bundle_extract(zip, wanted ++ sums) |> bad_bundle(file, :unreadable),
+         image = members[img_name],
+         :ok <-
+           check_listed_sha256(img_name <> ".sha256", members, [img_name]) |> bad_bundle(file),
+         :ok <- check_listed_sha256("SHA256SUMS", members, summed) |> bad_bundle(file),
+         :ok <- check_parts_in_image(image, flash, members) |> bad_bundle(file),
+         :ok <- check_bundle_chip(img_name, flash.chip) |> bad_bundle(file),
+         stamp = bundle_stamp(members["sdkconfig"]),
+         :ok <- check_stamp(stamp, expected_stamp, file) do
+      {:ok,
+       %{
+         stem: String.replace_suffix(img_name, ".img", ""),
+         image: image,
+         flash: flash,
+         stamp: stamp,
+         parts: Map.take(members, part_names),
+         partitions_csv: members["partitions.csv"]
+       }}
+    end
+  end
+
+  defp bad_bundle(:error, file, detail), do: {:error, {:bad_bundle, file, detail}}
+  defp bad_bundle({:ok, []}, file, detail), do: {:error, {:bad_bundle, file, detail}}
+  defp bad_bundle(result, _file, _detail), do: result
+
+  defp bad_bundle({:error, detail}, file), do: {:error, {:bad_bundle, file, detail}}
+  defp bad_bundle(result, _file), do: result
+
+  defp bundle_image_name(names) do
+    case Enum.filter(names, &String.ends_with?(&1, ".img")) do
+      [name] -> {:ok, name}
+      _names -> :error
+    end
+  end
+
+  defp members_present(names, wanted) do
+    case wanted -- names do
+      [] -> :ok
+      missing -> {:error, {:missing_members, missing}}
+    end
+  end
+
+  defp check_listed_sha256(sums_name, members, names) do
+    case members[sums_name] do
+      nil ->
+        :ok
+
+      text ->
+        Enum.find_value(parse_sha256_lines(text), :ok, fn {hex, name} ->
+          with true <- name in names,
+               {:error, _reason} <- verify_sha256(members[name], hex) do
+            {:error, {:sha256_mismatch, name}}
+          else
+            _ -> nil
+          end
+        end)
+    end
+  end
+
+  defp check_parts_in_image(image, flash, members) do
+    Enum.find_value(flash.parts, :ok, fn %{name: name, offset: offset} ->
+      data = members[name]
+      start = offset - flash.flash_offset
+
+      if start >= 0 and start + byte_size(data) <= byte_size(image) and
+           binary_part(image, start, byte_size(data)) == data,
+         do: nil,
+         else: {:error, {:part_mismatch, name, offset}}
+    end)
+  end
+
+  defp check_bundle_chip(img_name, flash_chip) do
+    case parse_name(img_name) do
+      {:ok, %{base_chip: chip}} when chip != flash_chip -> {:error, {:chip, flash_chip, chip}}
+      _ -> :ok
+    end
+  end
+
+  defp check_stamp(stamp, expected, file) do
+    if is_binary(stamp) and is_binary(expected) and stamp != expected do
+      {:error, {:stamp_mismatch, file, expected, stamp}}
+    else
+      :ok
+    end
+  end
+
+  @doc """
+  The header and the Contents section of a bundle's FLASH.txt.
+  """
+  def parse_flash_txt(text) do
+    fields = %{
+      image: capture(text, ~r/^AtomVM firmware image: (\S+)$/m),
+      chip: capture(text, ~r/^Chip: (\S+)$/m),
+      build: capture(text, ~r/^AtomVM build: (\S+)$/m),
+      idf: capture(text, ~r/^ESP-IDF: (\S+)$/m),
+      flash_offset: capture(text, ~r/^Flash offset: (0x[0-9a-fA-F]+)$/m),
+      app_offset: capture(text, ~r/^Application partition \(main\.avm\): (0x[0-9a-fA-F]+)$/m),
+      parts: contents(text)
+    }
+
+    cond do
+      fields.chip == nil ->
+        {:error, {:bad_flash_txt, :chip}}
+
+      fields.flash_offset == nil ->
+        {:error, {:bad_flash_txt, :flash_offset}}
+
+      true ->
+        {:ok,
+         %{
+           fields
+           | flash_offset: hex(fields.flash_offset),
+             app_offset: fields.app_offset && hex(fields.app_offset)
+         }}
+    end
+  end
+
+  defp capture(text, regex) do
+    case Regex.run(regex, text) do
+      [_, value] -> value
+      nil -> nil
+    end
+  end
+
+  defp hex("0x" <> digits), do: String.to_integer(digits, 16)
+
+  # The "Contents" section lists the parts of the image, one "<offset> <name>"
+  # line each; it ends where the next section's title is underlined.
+  defp contents(text) do
+    text
+    |> String.split("\n")
+    |> Enum.drop_while(&(&1 != "Contents"))
+    |> Enum.drop(2)
+    |> Enum.take_while(&(not Regex.match?(~r/^-+$/, &1)))
+    |> Enum.flat_map(fn line ->
+      case Regex.run(~r/^\s+(0x[0-9a-fA-F]+)\s+(\S+)$/, line) do
+        [_, offset, name] -> [%{name: name, offset: hex(offset)}]
+        nil -> []
+      end
+    end)
+  end
+
+  @doc """
+  The build stamp of a bundle, `CONFIG_APP_PROJECT_VER` in its sdkconfig.
+  """
+  def bundle_stamp(sdkconfig) when is_binary(sdkconfig) do
+    capture(sdkconfig, ~r/^CONFIG_APP_PROJECT_VER="([^"]*)"$/m)
+  end
+
+  def bundle_stamp(_sdkconfig), do: nil
+
+  @doc """
+  Whether an image was built for the connected chip; `:unknown` when the
+  image does not say which chip it is for.
+  """
+  def compatible?(image, chip_token) do
+    case image_chip(image) do
+      nil -> :unknown
+      chip -> chip == chip_token
+    end
+  end
+
+  def image_chip(%{base_chip: chip}) when is_binary(chip), do: chip
+  def image_chip(%{flash: %{chip: chip}}), do: chip
+  def image_chip(_image), do: nil
+
+  @doc """
+  The offset an image is flashed at: the one its bundle states, the chip's
+  bootloader offset otherwise; both when known, and they must agree.
+  """
+  def flash_offset_for(image, chip_token) do
+    bundle_offset = Map.get(image, :flash) && image.flash.flash_offset
+
+    case {bundle_offset, @flash_offsets[chip_token]} do
+      {nil, nil} -> {:error, {:unknown_flash_offset, chip_token}}
+      {nil, offset} -> {:ok, offset}
+      {offset, nil} -> {:ok, offset}
+      {offset, offset} -> {:ok, offset}
+      {bundle, table} -> {:error, {:flash_offset_conflict, image.file, bundle, table}}
+    end
+  end
+
+  def describe(image, flash_offset) do
+    details = [
+      image.stamp && "  build:    #{image.stamp}",
+      image.features != [] && "  features: #{Enum.join(image.features, ", ")}",
+      "  offset:   #{format_hex(flash_offset)}"
+    ]
+
+    ["#{image.name} (#{origin(image)})" | Enum.filter(details, &is_binary/1)]
+  end
+
+  defp origin(%{channel: :stable, version: version} = image),
+    do: "stable release #{version}, #{flavor(image)}"
+
+  defp origin(%{channel: :prerelease, version: version} = image),
+    do: "prerelease #{version}, #{flavor(image)}"
+
+  defp origin(%{channel: :nightly, version: version} = image),
+    do: "nightly build #{version}, #{flavor(image)}"
+
+  defp origin(image), do: "local image, #{flavor(image)}"
+
+  defp flavor(%{elixir?: true}), do: "Elixir"
+  defp flavor(%{elixir?: false}), do: "Erlang only"
+  defp flavor(_image), do: "unknown flavor"
+
+  def format_hex(integer), do: "0x" <> Integer.to_string(integer, 16)
+
+  def warnings(image, chip_token) do
+    [
+      image.elixir? == false &&
+        "this image has no Elixir support; the Elixir application of this project will not run on it",
+      compatible?(image, chip_token) == :unknown &&
+        "the chip this image was built for is not known; esptool refuses images built for another chip"
+    ]
+    |> Enum.filter(&is_binary/1)
   end
 
   @doc """
@@ -374,8 +805,37 @@ defmodule ExAtomVM.Esp32FirmwareImages do
     "#{name} is not an AtomVM ESP32 image name"
   end
 
-  def format_error({:release_not_found, :atomvm, tag}) do
-    "AtomVM release #{tag} not found"
+  def format_error({:release_not_found, source, tag}) do
+    "#{source_name(source)} has no release #{tag}"
+  end
+
+  def format_error({:unknown_image, name, source}) do
+    "#{source_name(source)} publishes no image called #{name}"
+  end
+
+  def format_error({:not_cached, name}) do
+    "#{name} is not in #{@cache_dir}/"
+  end
+
+  def format_error({:bad_bundle, file, detail}) do
+    "#{file} is not a valid firmware bundle: #{bundle_detail(detail)}"
+  end
+
+  def format_error({:stamp_mismatch, file, expected, actual}) do
+    "#{file} carries build #{actual} while the release notes say #{expected}; " <>
+      "the factory may be publishing a new build, retry in a few minutes"
+  end
+
+  def format_error({:chip_mismatch, file, image_chip, chip_family}) do
+    "#{file} was built for #{image_chip}, the connected chip is #{chip_family}"
+  end
+
+  def format_error({:flash_offset_conflict, file, bundle, table}) do
+    "#{file} says it is flashed at #{format_hex(bundle)}, the chip's bootloader offset is #{format_hex(table)}"
+  end
+
+  def format_error({:unknown_flash_offset, chip_token}) do
+    "no flash offset is known for #{chip_token}; install a bundle, which states it"
   end
 
   def format_error({:http, url, {:status, 403}}) do
@@ -400,4 +860,22 @@ defmodule ExAtomVM.Esp32FirmwareImages do
   end
 
   def format_error(reason), do: inspect(reason)
+
+  defp source_name(:atomvm), do: "the AtomVM releases"
+  defp source_name(:factory), do: "the firmware factory"
+
+  defp bundle_detail(:not_a_zip), do: "not a zip file"
+  defp bundle_detail(:no_image), do: "it does not contain exactly one .img file"
+  defp bundle_detail(:unreadable), do: "its members cannot be read"
+  defp bundle_detail({:missing_members, names}), do: "#{Enum.join(names, ", ")} missing"
+  defp bundle_detail({:bad_flash_txt, field}), do: "FLASH.txt does not state the #{field}"
+  defp bundle_detail({:sha256_mismatch, name}), do: "#{name} does not match its checksum"
+
+  defp bundle_detail({:part_mismatch, name, offset}),
+    do: "#{name} differs from the image at #{format_hex(offset)}"
+
+  defp bundle_detail({:chip, flash_chip, name_chip}),
+    do: "built for #{flash_chip}, named for #{name_chip}"
+
+  defp bundle_detail(detail), do: inspect(detail)
 end
