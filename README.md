@@ -382,6 +382,73 @@ automatically. The task refuses to make changes when another partition follows
 `main.avm`, because expanding it would overwrite that partition. It also
 refuses to modify devices with secure boot or secure download mode enabled.
 
+### The `atomvm.esp32.install` task
+
+The `atomvm.esp32.install` task erases the flash of a connected ESP32 board and
+installs AtomVM on it. It needs the optional `pythonx` and `req` dependencies:
+
+    {:pythonx, "~> 0.4.0", runtime: false},
+    {:req, "~> 0.5.0", runtime: false}
+
+Without options it installs the latest stable AtomVM release, saying so, since
+other images exist: prereleases, the nightly builds of
+[atomvm-esp32-firmware-factory](https://github.com/atomvm/atomvm-esp32-firmware-factory)
+with extra components and features (for example PSRAM support), and images
+built by yourself. List them with:
+
+    shell$ mix atomvm.esp32.install --list-images
+
+With a board connected, only the images for its chip are listed, along with the
+build it currently runs; `--chip esp32s3` picks a chip without a board and
+`--chip all` lists everything. The listing ends with the images on disk and,
+should none fit, points at `mix atomvm.esp32.build`, which builds a custom image
+from source.
+
+An image is installed by release tag, by the name shown in the listing, or by
+path, for a `.img` file or a firmware factory `.zip` bundle:
+
+    shell$ mix atomvm.esp32.install --version v0.7.0-alpha.1
+    shell$ mix atomvm.esp32.install --image AtomVM-esp32s3-atomgl-ipv6-libsodium-psram-nightly-0.7
+    shell$ mix atomvm.esp32.install --image _build/atomvm_images/atomvm-esp32s3-elixir.img
+
+Before erasing anything the task shows what it is about to install and asks for
+confirmation. It refuses an image built for another chip than the connected one,
+and warns when an image has no Elixir support, because the Elixir application of
+the project would not run on it.
+
+A GitHub repository publishing custom builds is used as a further source with
+`--repo OWNER/REPO` (or the repository's URL): alone it installs the latest
+release of that repository, with `--version` one of its releases, with `--image`
+one of its images by name, whatever the name, and with `--list-images` its
+builds are listed too.
+
+    shell$ mix atomvm.esp32.install --repo acme/atomvm-builds --image esp32s3-kiosk.img
+
+`--update` replaces only the AtomVM virtual machine and its boot library on a
+board that already runs AtomVM, keeping the bootloader, the partition table, NVS
+(Wi-Fi settings and the like) and the application in `main.avm`:
+
+    shell$ mix atomvm.esp32.install --update
+    shell$ mix atomvm.esp32.install --update --image AtomVM-esp32s3-atomgl-ipv6-libsodium-psram-nightly-0.7
+
+It works with every image the task can install, and refuses when the board runs
+no AtomVM, when its `factory` or `boot.avm` partition differs from the image's,
+or when its bootloader comes from a newer ESP-IDF than the image, since such a
+bootloader does not start the older virtual machine; install the whole image
+then. A `main.avm` grown by `mix atomvm.esp32.expand` does not stand in the way.
+
+Downloaded images are verified against the checksums GitHub publishes and kept
+in `firmware_images/` at the root of the project, the builds of a repository
+given with `--repo` in a subdirectory named after it, so a nightly build stays
+available after the factory has replaced it, offline too: install it by its
+cached name or path. Keep the directory out of git with:
+
+    shell$ echo '/firmware_images/' >> .gitignore
+
+The `_build/atomvm_binaries` directory of earlier versions is no longer used and
+can be deleted. `--baud` sets the flashing speed, 921600 by default; use 115200
+for slow connections.
+
 ### The `atomvm.stm32.flash` task
 
 The `atomvm.stm32.flash` task is used to flash your application to a micro-controller and executed by the AtomVM virtual machine.
