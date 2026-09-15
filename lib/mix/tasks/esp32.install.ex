@@ -35,11 +35,10 @@ defmodule Mix.Tasks.Atomvm.Esp32.Install do
 
   @shortdoc "Install AtomVM to ESP32 device"
 
-  @github_releases_url "https://api.github.com/repos/atomvm/atomvm/releases"
-
   # Req is an optional dependency, see check_req_dependency/0.
   @compile {:no_warn_undefined, Req}
 
+  alias ExAtomVM.Esp32FirmwareImages
   alias ExAtomVM.EsptoolHelper
 
   @impl Mix.Task
@@ -150,64 +149,46 @@ defmodule Mix.Tasks.Atomvm.Esp32.Install do
   end
 
   defp get_release(chip_family, version) do
-    cache_dir =
-      if Code.ensure_loaded?(Mix.Project) do
-        Path.join(Path.dirname(Mix.Project.build_path()), "atomvm_binaries")
-      else
-        Path.expand("_build/atomvm_binaries")
-      end
-
-    File.mkdir_p!(cache_dir)
-
     {:ok, _} = Application.ensure_all_started(:req)
+    chip = Esp32FirmwareImages.chip_token(chip_family)
 
-    with {:ok, response} <- Req.get(release_api_url(version)),
-         %{status: 200, body: body} <- response,
-         assets <- body["assets"] || [],
-         asset when not is_nil(asset) <- Enum.find(assets, &matches_chip_family?(&1, chip_family)) do
-      cached_file = Path.join(cache_dir, asset["name"])
-
-      if !File.exists?(cached_file) do
-        IO.puts("\nDownloading #{asset["name"]}, may take a while...")
-        {:ok, _response} = Req.get(asset["browser_download_url"], into: File.stream!(cached_file))
-        cached_file
-      else
-        IO.puts("\nUsing cached #{asset["name"]}")
-        cached_file
-      end
+    with {:ok, image} <- release_image(chip, version),
+         {:ok, image, status} <-
+           Esp32FirmwareImages.ensure_cached(image, log: &IO.puts("\n" <> &1)) do
+      if status == :downloaded, do: print_gitignore_hint()
+      image.path
     else
-      {:error, reason} ->
-        raise "Failed to fetch release: #{inspect(reason)}"
-
-      %{status: 404} when is_binary(version) ->
-        Mix.raise("AtomVM release not found: #{inspect(version)}")
-
-      %{status: status} ->
-        raise "GitHub API returned status #{status}"
-
-      nil ->
-        release = version || "the latest release"
-        raise "No matching Elixir image found for #{chip_family} in #{release}"
+      {:error, reason} -> raise Esp32FirmwareImages.format_error(reason)
     end
   end
 
-  @doc false
-  def release_api_url(nil), do: @github_releases_url <> "/latest"
+  # A release image has a fixed name, so a cached copy is used without asking
+  # GitHub which assets the release has.
+  defp release_image(chip, version) do
+    case version && Esp32FirmwareImages.find_cached("AtomVM-#{chip}-elixir-#{version}") do
+      [image | _] ->
+        {:ok, image}
 
-  def release_api_url(version) when is_binary(version) do
-    @github_releases_url <> "/tags/" <> URI.encode(version, &URI.char_unreserved?/1)
+      _ ->
+        with {:ok, release} <- Esp32FirmwareImages.fetch_release(:atomvm, version) do
+          release
+          |> Esp32FirmwareImages.release_images()
+          |> Esp32FirmwareImages.select_release_image(release["tag_name"], chip)
+        end
+    end
   end
 
-  defp matches_chip_family?(%{"name" => name}, chip_family) do
-    name = String.downcase(name)
+  defp print_gitignore_hint do
+    gitignore =
+      case File.read(".gitignore") do
+        {:ok, text} -> text
+        {:error, _reason} -> nil
+      end
 
-    chip_family =
-      String.downcase(chip_family)
-      |> String.replace("-", "")
-      |> String.replace(" ", "")
-
-    String.contains?(name, [chip_family]) && String.contains?(name, ["elixir"]) &&
-      String.ends_with?(name, ".img")
+    case Esp32FirmwareImages.gitignore_hint(gitignore) do
+      nil -> :ok
+      hint -> IO.puts("\n" <> hint)
+    end
   end
 
   defp erase_flash(device) do
