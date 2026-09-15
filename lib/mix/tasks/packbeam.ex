@@ -82,9 +82,6 @@ defmodule Mix.Tasks.Atomvm.Packbeam do
 
       {:error, :no_avm_deps_path} ->
         PackBEAM.make_avm(dep_beams, "deps.avm")
-
-      any ->
-        any
     end
   end
 
