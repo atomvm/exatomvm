@@ -16,6 +16,11 @@ defmodule Mix.Tasks.Atomvm.Esp32.Install do
       (cannot be combined with `--version`)
     * `--version` - AtomVM release tag to install, including prereleases (cannot be combined with `--image`)
     * `--baud` - Baud rate for flashing (default: 921600, use 115200 for slower devices)
+    * `--repo` - A GitHub repository of custom builds, `OWNER/REPO` or its URL, as a further
+      source of images: alone, its latest release is installed; with `--version` one of its
+      releases; with `--image` one of its images by name, whatever the name; with
+      `--list-images` its builds are listed too. Its images are cached under
+      `firmware_images/OWNER-REPO/`
     * `--list-images` - List the installable images instead: the latest stable release, newer
       prereleases, the nightly builds of atomvm-esp32-firmware-factory (with extra components
       and features such as PSRAM support), and the images on disk. With a connected board, only
@@ -39,6 +44,9 @@ defmodule Mix.Tasks.Atomvm.Esp32.Install do
       # Install a specific release, including prereleases (erases flash)
       mix atomvm.esp32.install --version v0.7.0-alpha.1
 
+      # Install a custom build published by another repository (erases flash)
+      mix atomvm.esp32.install --repo acme/atomvm-builds --image esp32s3-kiosk.img
+
       # Install with custom baud rate
       mix atomvm.esp32.install --baud 115200
 
@@ -57,8 +65,8 @@ defmodule Mix.Tasks.Atomvm.Esp32.Install do
   alias ExAtomVM.Esp32FirmwareImages
   alias ExAtomVM.EsptoolHelper
 
-  @usage "mix atomvm.esp32.install [--version TAG | --image FILE_OR_NAME] [--baud RATE], " <>
-           "or mix atomvm.esp32.install --list-images [--chip CHIP]"
+  @usage "mix atomvm.esp32.install [--version TAG | --image FILE_OR_NAME] [--repo OWNER/REPO] " <>
+           "[--baud RATE], or mix atomvm.esp32.install --list-images [--chip CHIP] [--repo OWNER/REPO]"
 
   @impl Mix.Task
   def run(args) do
@@ -68,6 +76,7 @@ defmodule Mix.Tasks.Atomvm.Esp32.Install do
           image: :string,
           version: :string,
           baud: :string,
+          repo: :string,
           list_images: :boolean,
           chip: :string
         ]
@@ -78,13 +87,14 @@ defmodule Mix.Tasks.Atomvm.Esp32.Install do
     baud = Keyword.get(opts, :baud, "921600")
     image = Keyword.get(opts, :image)
     version = Keyword.get(opts, :version)
+    source = repo_source(Keyword.get(opts, :repo))
 
     cond do
       opts[:list_images] && (image || version) ->
         Mix.raise("--list-images cannot be combined with --image or --version")
 
       opts[:list_images] ->
-        list_images(opts[:chip])
+        list_images(opts[:chip], source)
 
       opts[:chip] ->
         Mix.raise("--chip only applies to --list-images")
@@ -93,12 +103,12 @@ defmodule Mix.Tasks.Atomvm.Esp32.Install do
         Mix.raise("--image and --version cannot be used together")
 
       image ->
-        case Esp32FirmwareImages.classify_image_arg(image) do
+        case Esp32FirmwareImages.classify_image_arg(image, source != nil) do
           {:path, path} ->
-            install({:path, path}, baud)
+            install({:path, path}, baud, source)
 
           {:name, image} ->
-            install({:name, image}, baud)
+            install({:name, image}, baud, source)
 
           :error ->
             Mix.raise(
@@ -108,17 +118,27 @@ defmodule Mix.Tasks.Atomvm.Esp32.Install do
         end
 
       true ->
-        install({:release, version}, baud)
+        install({:release, version}, baud, source)
     end
   end
 
-  defp list_images(chip) do
+  defp repo_source(nil), do: nil
+
+  defp repo_source(arg) do
+    case Esp32FirmwareImages.parse_repo_arg(arg) do
+      {:ok, repo} -> {:repo, repo}
+      :error -> Mix.raise("--repo must be a GitHub repository, OWNER/REPO or its URL: #{arg}")
+    end
+  end
+
+  defp list_images(chip, source) do
     with {:error, :req_not_available, message} <- check_req_dependency(), do: fail(message)
     {:ok, _} = Application.ensure_all_started(:req)
     {filter, header} = list_filter(chip)
+    sources = [:atomvm, :factory] ++ List.wrap(source)
 
     {sections, header} =
-      case Esp32FirmwareImages.fetch_listing() do
+      case Esp32FirmwareImages.fetch_listing(sources) do
         {:ok, sections} ->
           {sections, header}
 
@@ -164,12 +184,12 @@ defmodule Mix.Tasks.Atomvm.Esp32.Install do
     "Connected: #{device["chip_family_name"]} on #{device["port"]}, installed: #{installed}"
   end
 
-  defp install(selector, baud) do
+  defp install(selector, baud, source) do
     with :ok <- check_dependencies(selector),
          :ok <- EsptoolHelper.setup(),
          device <- EsptoolHelper.select_device(),
          chip = Esp32FirmwareImages.chip_token(device["chip_family_name"]),
-         {:ok, image} <- resolve_image(selector, chip),
+         {:ok, image} <- resolve_image(selector, chip, source),
          :ok <- check_chip(image, chip, device),
          {:ok, offset} <- Esp32FirmwareImages.flash_offset_for(image, chip),
          :ok <- confirm_erase_and_flash(device, image, chip, offset),
@@ -213,23 +233,23 @@ defmodule Mix.Tasks.Atomvm.Esp32.Install do
   defp check_dependencies({:path, _path}), do: :ok
   defp check_dependencies(_selector), do: check_req_dependency()
 
-  defp resolve_image({:release, version}, chip) do
+  defp resolve_image({:release, version}, chip, source) do
     {:ok, _} = Application.ensure_all_started(:req)
 
-    with {:ok, image} <- release_image(chip, version) do
+    with {:ok, image} <- release_image(chip, version, source || :atomvm) do
       cache(image)
     end
   end
 
-  defp resolve_image({:name, image}, _chip) do
+  defp resolve_image({:name, image}, _chip, source) do
     {:ok, _} = Application.ensure_all_started(:req)
 
-    with {:ok, image} <- Esp32FirmwareImages.resolve(image) do
+    with {:ok, image} <- Esp32FirmwareImages.resolve(image, source) do
       cache(image)
     end
   end
 
-  defp resolve_image({:path, path}, _chip) do
+  defp resolve_image({:path, path}, _chip, _source) do
     if String.ends_with?(path, ".zip") do
       Esp32FirmwareImages.local_bundle(path)
     else
@@ -237,17 +257,22 @@ defmodule Mix.Tasks.Atomvm.Esp32.Install do
     end
   end
 
-  # A release image has a fixed name, so a cached copy is used without asking
-  # GitHub which assets the release has.
-  defp release_image(chip, version) do
-    case version && Esp32FirmwareImages.find_cached("AtomVM-#{chip}-elixir-#{version}") do
-      [image | _] ->
+  # An AtomVM release image has a fixed name, so a cached copy is used without
+  # asking GitHub which assets the release has.
+  defp release_image(chip, version, source) do
+    cached =
+      if source == :atomvm and version,
+        do: Esp32FirmwareImages.find_cached("AtomVM-#{chip}-elixir-#{version}"),
+        else: []
+
+    case cached do
+      [image | _older] ->
         {:ok, image}
 
-      _ ->
-        with {:ok, release} <- Esp32FirmwareImages.fetch_release(:atomvm, version) do
+      [] ->
+        with {:ok, release} <- Esp32FirmwareImages.fetch_release(source, version) do
           release
-          |> Esp32FirmwareImages.release_images()
+          |> Esp32FirmwareImages.release_images(source)
           |> Esp32FirmwareImages.select_release_image(release["tag_name"], chip)
         end
     end

@@ -21,6 +21,12 @@ defmodule Mix.Tasks.Atomvm.Esp32.InstallTest do
     end
   end
 
+  test "rejects a repository that is not OWNER/REPO" do
+    assert_raise Mix.Error, ~r/^--repo must be a GitHub repository/, fn ->
+      Install.run(["--repo", "https://gitlab.com/acme/builds", "--list-images"])
+    end
+  end
+
   test "rejects stray and unknown arguments" do
     assert_raise Mix.Error, ~r/^Usage: mix atomvm.esp32.install/, fn -> Install.run(["extra"]) end
 

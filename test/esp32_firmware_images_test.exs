@@ -481,7 +481,7 @@ defmodule ExAtomVM.Esp32FirmwareImagesTest do
       image = Images.local_image("/tmp/kiosk.img")
 
       assert Images.describe(image, 0) == [
-               "kiosk (local image, unknown flavor)",
+               "kiosk (local image, unknown)",
                "  offset:   0x0"
              ]
 
@@ -639,6 +639,115 @@ defmodule ExAtomVM.Esp32FirmwareImagesTest do
     end
   end
 
+  describe "parse_repo_arg/1" do
+    test "accepts OWNER/REPO and the URL of a repository" do
+      for arg <- [
+            "acme/atomvm-builds",
+            "https://github.com/acme/atomvm-builds",
+            "https://github.com/acme/atomvm-builds/releases/",
+            "github.com/acme/atomvm-builds.git",
+            " acme/atomvm-builds "
+          ] do
+        assert Images.parse_repo_arg(arg) == {:ok, "acme/atomvm-builds"}, arg
+      end
+    end
+
+    test "rejects anything else" do
+      for arg <- ["acme", "https://gitlab.com/acme/builds", "acme/builds/extra", "acme//x", ""] do
+        assert Images.parse_repo_arg(arg) == :error, arg
+      end
+    end
+  end
+
+  describe "release_images/2 on a repository of custom builds" do
+    test "keeps the images that do not follow the naming convention" do
+      source = {:repo, "acme/atomvm-builds"}
+      images = Images.release_images(custom_release("v1.2.0"), source)
+      assert Enum.map(images, & &1.name) == ["AtomVM-esp32s3-elixir-lvgl-v1.2.0", "esp32s3-kiosk"]
+
+      assert %{
+               file: "esp32s3-kiosk.img",
+               kind: :img,
+               chip: nil,
+               elixir?: nil,
+               version: "v1.2.0",
+               channel: :custom,
+               stamp: nil,
+               source: ^source,
+               sha256_url:
+                 "https://github.com/acme/atomvm-builds/releases/download/v1.2.0/esp32s3-kiosk.img.sha256"
+             } = List.last(images)
+
+      assert %{chip: "esp32s3", elixir?: true, features: ["lvgl"], channel: :stable} = hd(images)
+    end
+
+    test "stamps the images of a rolling tag with their upload date" do
+      [_, kiosk] = Images.release_images(custom_release("latest"), {:repo, "acme/atomvm-builds"})
+      assert kiosk.stamp == "latest+20250623"
+      assert Images.cached_file_name(kiosk) == "esp32s3-kiosk+20250623.img"
+    end
+
+    test "never lists custom names from the default sources" do
+      assert [%{name: "AtomVM-esp32s3-elixir-lvgl-v1.2.0"}] =
+               Images.release_images(custom_release("v1.2.0"))
+    end
+  end
+
+  describe "listing_sections/2 and render_list/2 with a repository" do
+    test "lists the builds of each release, custom names installable by name" do
+      source = {:repo, "acme/atomvm-builds"}
+
+      assert [
+               %{
+                 kind: :custom,
+                 title: "Custom builds (acme/atomvm-builds), release v1.2.0 (2025-06-23)"
+               } = section
+             ] =
+               Images.listing_sections(source, [custom_release("v1.2.0")])
+
+      output = Images.render_list([section], filter: ["esp32s3"])
+      assert output =~ ~r/^  AtomVM-esp32s3-elixir-lvgl-v1.2.0 +Elixir +2.1 MB$/m
+      assert output =~ ~r/^  esp32s3-kiosk.img +unknown +2.1 MB  install by name with --repo$/m
+      refute output =~ "not shown"
+    end
+  end
+
+  describe "find_in_releases/3" do
+    test "finds a name in the newest release that has it, whatever its case" do
+      source = {:repo, "acme/atomvm-builds"}
+      releases = [custom_release("v1.3.0"), custom_release("v1.2.0")]
+
+      assert {:ok, %{tag: "v1.3.0"}} = Images.find_in_releases(releases, "ESP32S3-KIOSK", source)
+
+      assert {:ok, %{tag: "v1.3.0", name: "AtomVM-esp32s3-elixir-lvgl-v1.3.0"}} =
+               Images.find_in_releases(releases, "AtomVM-esp32s3-elixir-lvgl-v1.3.0", source)
+
+      assert {:error, {:unknown_image, "other", ^source}} =
+               Images.find_in_releases(releases, "other", source)
+    end
+  end
+
+  describe "classify_image_arg/2 with a repository" do
+    test "takes any name as a custom build to look up" do
+      assert {:name, %{name: "esp32s3-kiosk", file: "esp32s3-kiosk.img", channel: :custom}} =
+               Images.classify_image_arg("esp32s3-kiosk.img", true)
+
+      assert {:name, %{name: "AtomVM-esp32s3-elixir-v0.6.6", channel: :stable}} =
+               Images.classify_image_arg("AtomVM-esp32s3-elixir-v0.6.6", true)
+
+      assert Images.classify_image_arg("esp32s3-kiosk.img", false) == :error
+    end
+  end
+
+  describe "cache_dir/1" do
+    test "gives a repository of custom builds a subdirectory of its own" do
+      assert Images.cache_dir({:repo, "acme/atomvm-builds"}) ==
+               Path.join(Images.cache_dir(), "acme-atomvm-builds")
+
+      assert Images.cache_dir(:factory) == Images.cache_dir()
+    end
+  end
+
   describe "select_release_image/3" do
     setup do
       %{images: Images.release_images(release("v0.7.0-alpha.1", prerelease: true))}
@@ -686,7 +795,10 @@ defmodule ExAtomVM.Esp32FirmwareImagesTest do
             {:size_mismatch, "x.img", 10, 9},
             {:digest_mismatch, "x.img", "aa", "bb"},
             {:release_not_found, :factory, "nightly-0.8"},
+            {:release_not_found, {:repo, "acme/atomvm-builds"}, nil},
             {:unknown_image, "AtomVM-esp32-v9.9.9", :atomvm},
+            {:unknown_image, "kiosk", {:repo, "acme/atomvm-builds"}},
+            {:no_image_for_chip, "v1.2.0", "esp32s3", []},
             {:not_cached, "AtomVM-esp32-v9.9.9"},
             {:bad_bundle, "b.zip", :not_a_zip},
             {:bad_bundle, "b.zip", :no_image},
@@ -749,6 +861,29 @@ defmodule ExAtomVM.Esp32FirmwareImagesTest do
     |> Enum.map(fn {path, source, size} ->
       Map.merge(Images.local_image(path), %{source: source, size: size})
     end)
+  end
+
+  defp custom_release(tag) do
+    download = "https://github.com/acme/atomvm-builds/releases/download/#{tag}/"
+
+    assets =
+      for name <- [
+            "AtomVM-esp32s3-elixir-lvgl-#{tag}.img",
+            "esp32s3-kiosk.img",
+            "esp32s3-kiosk.img.sha256",
+            "README.md"
+          ] do
+        %{asset(tag, name, 2_197_764) | "browser_download_url" => download <> name}
+      end
+
+    %{
+      "tag_name" => tag,
+      "prerelease" => false,
+      "draft" => false,
+      "published_at" => "2025-06-23T23:04:23Z",
+      "body" => "",
+      "assets" => assets
+    }
   end
 
   defp factory_release do

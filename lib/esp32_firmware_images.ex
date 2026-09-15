@@ -127,7 +127,7 @@ defmodule ExAtomVM.Esp32FirmwareImages do
 
     for %{"name" => name} = asset <- assets,
         String.ends_with?(name, [".img", ".zip"]),
-        {:ok, image} <- [parse_name(name)] do
+        image <- List.wrap(asset_image(name, tag, source)) do
       Map.merge(image, %{
         source: source,
         tag: tag,
@@ -142,6 +142,23 @@ defmodule ExAtomVM.Esp32FirmwareImages do
     end
   end
 
+  # A repository of custom builds may name its images as it likes: those are
+  # listed as they are and installed by name.
+  defp asset_image(name, tag, {:repo, _repo}) do
+    case parse_name(name) do
+      {:ok, %{version: nil} = image} -> %{image | version: tag, channel: :custom}
+      {:ok, image} -> image
+      {:error, _reason} -> %{file_image(name) | version: tag, channel: :custom}
+    end
+  end
+
+  defp asset_image(name, _tag, _source) do
+    case parse_name(name) do
+      {:ok, image} -> image
+      {:error, _reason} -> nil
+    end
+  end
+
   defp date(<<date::binary-size(10), _::binary>>), do: date
   defp date(_), do: nil
 
@@ -151,18 +168,20 @@ defmodule ExAtomVM.Esp32FirmwareImages do
   # The assets of a rolling tag keep their names from one build to the next.
   # A bundle carries its build stamp, which the factory also writes in the
   # release notes; a plain image is told apart by the day it was uploaded.
-  defp rolling_stamp(%{channel: :nightly, kind: :zip}, release, _asset) do
-    stamp_from_body(release["body"])
+  defp rolling_stamp(%{kind: :zip}, release, _asset) do
+    if rolling_tag?(release["tag_name"]), do: stamp_from_body(release["body"])
   end
 
-  defp rolling_stamp(%{channel: :nightly, kind: :img, version: version}, _release, asset) do
-    case date(asset["updated_at"]) do
-      nil -> nil
-      date -> version <> "+" <> String.replace(date, "-", "")
+  defp rolling_stamp(%{kind: :img, version: version}, release, asset) do
+    with true <- rolling_tag?(release["tag_name"]),
+         date when is_binary(date) <- date(asset["updated_at"]) do
+      (version || release["tag_name"]) <> "+" <> String.replace(date, "-", "")
+    else
+      _ -> nil
     end
   end
 
-  defp rolling_stamp(_image, _release, _asset), do: nil
+  defp rolling_tag?(tag), do: not Regex.match?(~r/^v\d/, tag || "")
 
   @doc """
   The build stamp the factory writes in its release notes.
@@ -177,9 +196,54 @@ defmodule ExAtomVM.Esp32FirmwareImages do
   def stamp_from_body(_body), do: nil
 
   @doc """
-  Fetches a release of a source, the latest one when the tag is nil.
+  A source of custom builds given as `--repo`: `OWNER/REPO`, or the URL of the
+  repository on GitHub.
   """
-  def fetch_release(source, tag) do
+  def parse_repo_arg(arg) do
+    repo =
+      arg
+      |> String.trim()
+      |> String.replace_prefix("https://", "")
+      |> String.replace_prefix("http://", "")
+      |> String.replace_prefix("github.com/", "")
+      |> String.trim_trailing("/")
+      |> String.replace_suffix("/releases", "")
+      |> String.replace_suffix(".git", "")
+
+    case String.split(repo, "/") do
+      [owner, name] when owner != "" and name != "" ->
+        if Regex.match?(~r|^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$|, repo),
+          do: {:ok, repo},
+          else: :error
+
+      _parts ->
+        :error
+    end
+  end
+
+  @doc """
+  Fetches a release of a source, the latest one when the tag is nil. A
+  repository of custom builds may have no stable release, then its newest
+  release is the latest.
+  """
+  def fetch_release({:repo, _repo} = source, nil) do
+    case fetch_release_at(source, nil) do
+      {:error, {:release_not_found, _source, nil}} ->
+        with {:ok, releases} <- fetch_json(releases_url(source, :list)) do
+          case Enum.reject(releases, & &1["draft"]) do
+            [release | _older] -> {:ok, release}
+            [] -> {:error, {:release_not_found, source, nil}}
+          end
+        end
+
+      result ->
+        result
+    end
+  end
+
+  def fetch_release(source, tag), do: fetch_release_at(source, tag)
+
+  defp fetch_release_at(source, tag) do
     case fetch_json(releases_url(source, tag)) do
       {:ok, release} -> {:ok, release}
       {:error, {:http, _url, {:status, 404}}} -> {:error, {:release_not_found, source, tag}}
@@ -187,18 +251,18 @@ defmodule ExAtomVM.Esp32FirmwareImages do
     end
   end
 
-  defp releases_url(:atomvm, :list),
-    do: @atomvm_releases_url <> "?per_page=#{@releases_page_size}"
+  defp releases_url(source, :list),
+    do: releases_base(source) <> "?per_page=#{@releases_page_size}"
 
-  defp releases_url(:factory, :list),
-    do: @factory_releases_url <> "?per_page=#{@releases_page_size}"
+  defp releases_url(source, nil), do: releases_base(source) <> "/latest"
 
-  defp releases_url(:atomvm, tag), do: release_api_url(tag)
-  defp releases_url(:factory, nil), do: @factory_releases_url <> "/latest"
-
-  defp releases_url(:factory, tag) do
-    @factory_releases_url <> "/tags/" <> URI.encode(tag, &URI.char_unreserved?/1)
+  defp releases_url(source, tag) do
+    releases_base(source) <> "/tags/" <> URI.encode(tag, &URI.char_unreserved?/1)
   end
+
+  defp releases_base(:atomvm), do: @atomvm_releases_url
+  defp releases_base(:factory), do: @factory_releases_url
+  defp releases_base({:repo, repo}), do: "https://api.github.com/repos/#{repo}/releases"
 
   @doc """
   The sections of `--list-images`, one API call per source: the latest stable
@@ -234,6 +298,15 @@ defmodule ExAtomVM.Esp32FirmwareImages do
     [%{kind: :nightly, title: "Nightly builds (atomvm-esp32-firmware-factory)", images: images}]
   end
 
+  def listing_sections({:repo, repo} = source, releases) do
+    for release <- releases, not release["draft"] do
+      title =
+        "Custom builds (#{repo}), release #{release["tag_name"]} (#{date(release["published_at"])})"
+
+      %{kind: :custom, title: title, images: release_images(release, source)}
+    end
+  end
+
   @doc """
   The newest stable release and the prereleases newer than it, out of the
   list GitHub returns, newest first.
@@ -253,8 +326,20 @@ defmodule ExAtomVM.Esp32FirmwareImages do
   end
 
   def local_images do
-    without_extracted(files(cache_dir(), @cache_dir, :cache)) ++
-      files(@build_images_dir, @build_images_dir, :build)
+    dir = cache_dir()
+
+    subdirs =
+      case File.ls(dir) do
+        {:ok, entries} -> entries |> Enum.sort() |> Enum.filter(&File.dir?(Path.join(dir, &1)))
+        {:error, _reason} -> []
+      end
+
+    cached =
+      Enum.flat_map([dir | Enum.map(subdirs, &Path.join(dir, &1))], fn cache ->
+        files(cache, Path.relative_to_cwd(cache), :cache)
+      end)
+
+    without_extracted(cached) ++ files(@build_images_dir, @build_images_dir, :build)
   end
 
   @doc """
@@ -341,6 +426,7 @@ defmodule ExAtomVM.Esp32FirmwareImages do
   end
 
   defp label(%{kind: :local}, image), do: image.path
+  defp label(_section, %{chip: nil} = image), do: image.file
   defp label(_section, image), do: image.name
 
   defp row(section, image, width, published) do
@@ -375,6 +461,7 @@ defmodule ExAtomVM.Esp32FirmwareImages do
   end
 
   defp note(%{kind: :local}, _image, _published), do: "  cached"
+  defp note(%{kind: :custom}, %{chip: nil}, _published), do: "  install by name with --repo"
   defp note(_section, _image, _published), do: ""
 
   def format_size(nil), do: ""
@@ -382,44 +469,69 @@ defmodule ExAtomVM.Esp32FirmwareImages do
   def format_size(bytes), do: "#{div(bytes + 1023, 1024)} KB"
 
   @doc """
-  What `--image` names: a file, or a published image to fetch by name.
+  What `--image` names: a file, or a published image to fetch by name. With a
+  repository of custom builds, any name is looked up there.
   """
-  def classify_image_arg(arg) do
+  def classify_image_arg(arg, custom_source? \\ false) do
     if File.regular?(arg) do
       {:path, arg}
     else
       case parse_name(arg) do
         {:ok, %{version: version} = image} when is_binary(version) -> {:name, image}
+        _ when custom_source? -> {:name, %{file_image(Path.basename(arg)) | channel: :custom}}
         _ -> :error
       end
     end
   end
 
   @doc """
-  Finds a named image on the source its version belongs to: the factory for
-  a nightly channel, the AtomVM releases otherwise. Offline, a cached copy.
+  Finds a named image: in the newest release of a repository of custom builds
+  that has it, otherwise on the source its version belongs to, the factory
+  for a nightly channel and the AtomVM releases otherwise. Offline, a cached
+  copy.
   """
-  def resolve(%{name: name, version: version, channel: channel}) do
+  def resolve(image, source \\ nil)
+
+  def resolve(%{name: name}, {:repo, _repo} = source) do
+    case fetch_json(releases_url(source, :list)) do
+      {:ok, releases} -> find_in_releases(releases, name, source)
+      {:error, reason} -> cached_or(name, source, reason)
+    end
+  end
+
+  def resolve(%{name: name, version: version, channel: channel}, nil) do
     source = if channel == :nightly, do: :factory, else: :atomvm
 
     case fetch_release(source, version) do
-      {:ok, release} ->
-        release
-        |> release_images(source)
-        |> Enum.find(&(String.downcase(&1.name) == String.downcase(name)))
-        |> case do
-          nil -> {:error, {:unknown_image, name, source}}
-          image -> {:ok, image}
-        end
+      {:ok, release} -> find_in_releases([release], name, source)
+      {:error, {:release_not_found, _source, _tag}} -> {:error, {:unknown_image, name, source}}
+      {:error, reason} -> cached_or(name, source, reason)
+    end
+  end
 
-      {:error, {:release_not_found, _source, _tag}} ->
-        {:error, {:unknown_image, name, source}}
+  @doc """
+  The image called `name` in the newest of the releases that has it.
+  """
+  def find_in_releases(releases, name, source) do
+    wanted = String.downcase(name)
 
-      {:error, {:http, _url, _reason} = reason} ->
-        case find_cached(name) do
-          [image | _] -> {:ok, image}
-          [] -> {:error, reason}
-        end
+    found =
+      for release <- releases,
+          not release["draft"],
+          image <- release_images(release, source),
+          String.downcase(image.name) == wanted,
+          do: image
+
+    case found do
+      [image | _older] -> {:ok, image}
+      [] -> {:error, {:unknown_image, name, source}}
+    end
+  end
+
+  defp cached_or(name, source, reason) do
+    case find_cached(name, source) do
+      [image | _older] -> {:ok, image}
+      [] -> {:error, reason}
     end
   end
 
@@ -446,6 +558,13 @@ defmodule ExAtomVM.Esp32FirmwareImages do
   def cache_dir, do: Path.join(File.cwd!(), @cache_dir)
 
   @doc """
+  The cache directory of a source: the images of a repository of custom
+  builds go in a subdirectory of their own.
+  """
+  def cache_dir({:repo, repo}), do: Path.join(cache_dir(), String.replace(repo, "/", "-"))
+  def cache_dir(_source), do: cache_dir()
+
+  @doc """
   The file name an image is cached under: its own for a release, its name
   plus the build stamp for a rolling tag, where names repeat.
   """
@@ -459,8 +578,8 @@ defmodule ExAtomVM.Esp32FirmwareImages do
   @doc """
   The cached copies of the image called `name`, newest build first.
   """
-  def find_cached(name) do
-    dir = cache_dir()
+  def find_cached(name, source \\ :atomvm) do
+    dir = cache_dir(source)
 
     case File.ls(dir) do
       {:ok, files} ->
@@ -487,9 +606,25 @@ defmodule ExAtomVM.Esp32FirmwareImages do
   """
   def ensure_cached(image, opts \\ [])
 
+  # Found in the cache already, by find_cached/2.
+  def ensure_cached(%{path: path, kind: kind} = image, opts) when is_binary(path) do
+    log = Keyword.get(opts, :log, fn _message -> :ok end)
+
+    cond do
+      not File.exists?(path) -> {:error, {:not_cached, image.name}}
+      kind == :zip -> with({:ok, image} <- load_bundle(image, path), do: {:ok, image, :cached})
+      true -> {:ok, image, :cached}
+    end
+    |> tap(fn
+      {:ok, _image, :cached} -> log.("Using cached #{Path.relative_to_cwd(path)}")
+      _error -> :ok
+    end)
+  end
+
   def ensure_cached(%{kind: :zip} = image, opts) do
     log = Keyword.get(opts, :log, fn _message -> :ok end)
-    path = image.stamp && Path.join(cache_dir(), cached_file_name(image))
+    dir = cache_dir(image.source)
+    path = image.stamp && Path.join(dir, cached_file_name(image))
 
     if path && File.exists?(path) do
       log.("Using cached #{Path.relative_to_cwd(path)}")
@@ -509,7 +644,7 @@ defmodule ExAtomVM.Esp32FirmwareImages do
         end
 
         image = %{image | stamp: bundle.stamp || image.stamp}
-        path = Path.join(cache_dir(), cached_file_name(image))
+        path = Path.join(dir, cached_file_name(image))
         write_atomically(path, data)
         write_atomically(bundle_image_path(path), bundle.image)
         {:ok, with_bundle(image, path, bundle), :downloaded}
@@ -519,7 +654,7 @@ defmodule ExAtomVM.Esp32FirmwareImages do
 
   def ensure_cached(image, opts) do
     log = Keyword.get(opts, :log, fn _message -> :ok end)
-    path = Path.join(cache_dir(), cached_file_name(image))
+    path = Path.join(cache_dir(image.source), cached_file_name(image))
 
     if File.exists?(path) do
       log.("Using cached #{Path.relative_to_cwd(path)}")
@@ -843,11 +978,14 @@ defmodule ExAtomVM.Esp32FirmwareImages do
   defp origin(%{channel: :nightly, version: version} = image),
     do: "nightly build #{version}, #{flavor(image)}"
 
+  defp origin(%{channel: :custom, version: version} = image),
+    do: "custom build, release #{version}, #{flavor(image)}"
+
   defp origin(image), do: "local image, #{flavor(image)}"
 
   defp flavor(%{elixir?: true}), do: "Elixir"
   defp flavor(%{elixir?: false}), do: "Erlang only"
-  defp flavor(_image), do: "unknown flavor"
+  defp flavor(_image), do: "unknown"
 
   def format_hex(integer), do: "0x" <> Integer.to_string(integer, 16)
 
@@ -983,6 +1121,11 @@ defmodule ExAtomVM.Esp32FirmwareImages do
     end
   end
 
+  def format_error({:no_image_for_chip, tag, chip_token, []}) do
+    "release #{tag} has no image named for #{chip_token}; " <>
+      "custom builds are installed by name with --image"
+  end
+
   def format_error({:no_image_for_chip, tag, chip_token, chips}) do
     "release #{tag} has no image for #{chip_token}; it has images for: #{Enum.join(chips, ", ")}"
   end
@@ -993,6 +1136,10 @@ defmodule ExAtomVM.Esp32FirmwareImages do
 
   def format_error({:unrecognized_name, name}) do
     "#{name} is not an AtomVM ESP32 image name"
+  end
+
+  def format_error({:release_not_found, source, nil}) do
+    "#{source_name(source)} has no release"
   end
 
   def format_error({:release_not_found, source, tag}) do
@@ -1053,6 +1200,7 @@ defmodule ExAtomVM.Esp32FirmwareImages do
 
   defp source_name(:atomvm), do: "the AtomVM releases"
   defp source_name(:factory), do: "the firmware factory"
+  defp source_name({:repo, repo}), do: "the #{repo} repository"
 
   defp bundle_detail(:not_a_zip), do: "not a zip file"
   defp bundle_detail(:no_image), do: "it does not contain exactly one .img file"
