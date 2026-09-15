@@ -24,15 +24,10 @@ defmodule Mix.Tasks.Atomvm.Check do
 
     beams_path = Project.compile_path()
 
-    instructions_check = check_instructions(beams_path)
-    ext_calls_check = check_ext_calls(beams_path)
+    :ok = check_instructions(beams_path)
+    :ok = check_ext_calls(beams_path)
 
-    with :ok <- instructions_check,
-         :ok <- ext_calls_check do
-      {:ok, []}
-    else
-      _any -> exit({:shutdown, 1})
-    end
+    {:ok, []}
   end
 
   defp extract_instructions({:beam_file, module_name, _exported_funcs, _, _, code}) do
