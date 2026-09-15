@@ -14,6 +14,11 @@ defmodule Mix.Tasks.Atomvm.Check do
 
   alias Mix.Project
 
+  # beam_disasm gives the float arithmetic opcodes and raise the same
+  # {:bif, name, fail, args, dest} shape as bif0 to bif3. They are instructions,
+  # listed in instructions.txt, and not calls to an erlang: function.
+  @bif_shaped_instructions [:fadd, :fsub, :fmul, :fdiv, :fnegate, :raise]
+
   def run(args) do
     Mix.Tasks.Compile.run(args)
 
@@ -33,6 +38,9 @@ defmodule Mix.Tasks.Atomvm.Check do
   defp extract_instructions({:beam_file, module_name, _exported_funcs, _, _, code}) do
     instructions =
       scan_instructions(code, fn
+        {:bif, func, _, _, _}, acc when func in @bif_shaped_instructions ->
+          ["#{func}" | acc]
+
         {:bif, _func, _, args, _}, acc ->
           ["bif#{length(args)}" | acc]
 
@@ -42,17 +50,8 @@ defmodule Mix.Tasks.Atomvm.Check do
         {:init, _}, acc ->
           ["kill" | acc]
 
-        {:test, :is_ne, _, _}, acc ->
-          ["is_not_equal" | acc]
-
-        {:test, :is_ne_exact, _, _}, acc ->
-          ["is_not_eq_exact" | acc]
-
-        {:test, :is_eq, _, _}, acc ->
-          ["is_equal" | acc]
-
-        {:test, test, _, _}, acc ->
-          ["#{test}" | acc]
+        instr, acc when is_tuple(instr) and elem(instr, 0) == :test ->
+          ["#{test_name(elem(instr, 1))}" | acc]
 
         instr, acc when is_tuple(instr) ->
           ["#{elem(instr, 0)}" | acc]
@@ -63,6 +62,14 @@ defmodule Mix.Tasks.Atomvm.Check do
 
     {module_name, instructions}
   end
+
+  # A test tuple carries the instruction name second and comes in several sizes,
+  # four for a plain comparison and up to six for the bit syntax ones. Three of
+  # the comparisons beam_disasm spells differently from AtomVM's opcode table.
+  defp test_name(:is_eq), do: :is_equal
+  defp test_name(:is_ne), do: :is_not_equal
+  defp test_name(:is_ne_exact), do: :is_not_eq_exact
+  defp test_name(test), do: test
 
   defp extract_instructions(path) do
     files = list_beam_files(path)
@@ -98,7 +105,7 @@ defmodule Mix.Tasks.Atomvm.Check do
         {:call_ext_only, _, {:extfunc, module, extfunc, arity}}, acc ->
           [{module, extfunc, arity} | acc]
 
-        {:bif, func, _, args, _}, acc ->
+        {:bif, func, _, args, _}, acc when func not in @bif_shaped_instructions ->
           [{:erlang, func, length(args)} | acc]
 
         {:gc_bif, func, _, _, args, _}, acc ->
@@ -208,15 +215,6 @@ defmodule Mix.Tasks.Atomvm.Check do
     missing_instructions = MapSet.difference(instructions_set, avail_instructions)
 
     if MapSet.size(missing_instructions) != 0 do
-      if MapSet.member?(missing_instructions, "elixir_erl_pass:parens_map_field/2") do
-        IO.puts("""
-        Error:
-          using module.function() notation (with parentheses) to fetch
-          map.field() is deprecated,
-          you must remove the parentheses: map.field
-        """)
-      end
-
       IO.puts("Warning: following missing instructions are used:")
       print_list(missing_instructions)
       IO.puts("")
@@ -244,10 +242,19 @@ defmodule Mix.Tasks.Atomvm.Check do
   end
 
   defp scan_instructions(code, fun) do
-    Enum.map(code, fn {:function, _func_name, _, _, func_code} ->
+    code
+    |> Enum.reject(&macro_function?/1)
+    |> Enum.map(fn {:function, _func_name, _, _, func_code} ->
       Enum.reduce(func_code, [], fun)
     end)
     |> List.flatten()
     |> Enum.uniq()
+  end
+
+  # A MACRO- function is the body of a macro or a guard: it runs in the compiler
+  # on the build host and never on AtomVM, so what it calls and the instructions
+  # it uses say nothing about the application.
+  defp macro_function?({:function, name, _, _, _}) do
+    String.starts_with?(Atom.to_string(name), "MACRO-")
   end
 end
