@@ -37,6 +37,9 @@ defmodule Mix.Tasks.Atomvm.Esp32.Install do
 
   @github_releases_url "https://api.github.com/repos/atomvm/atomvm/releases"
 
+  # Req is an optional dependency, see check_req_dependency/0.
+  @compile {:no_warn_undefined, Req}
+
   alias ExAtomVM.EsptoolHelper
 
   @impl Mix.Task

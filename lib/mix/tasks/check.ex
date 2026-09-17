@@ -24,15 +24,10 @@ defmodule Mix.Tasks.Atomvm.Check do
 
     beams_path = Project.compile_path()
 
-    instructions_check = check_instructions(beams_path)
-    ext_calls_check = check_ext_calls(beams_path)
+    :ok = check_instructions(beams_path)
+    :ok = check_ext_calls(beams_path)
 
-    with :ok <- instructions_check,
-         :ok <- ext_calls_check do
-      {:ok, []}
-    else
-      _any -> exit({:shutdown, 1})
-    end
+    {:ok, []}
   end
 
   defp extract_instructions({:beam_file, module_name, _exported_funcs, _, _, code}) do
@@ -63,14 +58,6 @@ defmodule Mix.Tasks.Atomvm.Check do
     {module_name, instructions}
   end
 
-  # A test tuple carries the instruction name second and comes in several sizes,
-  # four for a plain comparison and up to six for the bit syntax ones. Three of
-  # the comparisons beam_disasm spells differently from AtomVM's opcode table.
-  defp test_name(:is_eq), do: :is_equal
-  defp test_name(:is_ne), do: :is_not_equal
-  defp test_name(:is_ne_exact), do: :is_not_eq_exact
-  defp test_name(test), do: test
-
   defp extract_instructions(path) do
     files = list_beam_files(path)
 
@@ -92,6 +79,14 @@ defmodule Mix.Tasks.Atomvm.Check do
     |> Enum.uniq()
     |> Enum.into(MapSet.new())
   end
+
+  # A test tuple carries the instruction name second and comes in several sizes,
+  # four for a plain comparison and up to six for the bit syntax ones. Three of
+  # the comparisons beam_disasm spells differently from AtomVM's opcode table.
+  defp test_name(:is_eq), do: :is_equal
+  defp test_name(:is_ne), do: :is_not_equal
+  defp test_name(:is_ne_exact), do: :is_not_eq_exact
+  defp test_name(test), do: test
 
   defp extract_ext_calls({:beam_file, module_name, _, _, _, code}) do
     ext_calls =

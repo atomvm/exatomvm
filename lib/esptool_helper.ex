@@ -3,6 +3,9 @@ defmodule ExAtomVM.EsptoolHelper do
   Module for setting up and using esptool through Pythonx.
   """
 
+  # Pythonx is an optional dependency.
+  @compile {:no_warn_undefined, Pythonx}
+
   @doc """
   Initializes Python environment with project configuration.
   We use locked main branch esptool version, pending a stable 5.x release,
@@ -82,8 +85,8 @@ defmodule ExAtomVM.EsptoolHelper do
           """,
           %{"tool_args" => tool_args}
         )
-      rescue
-        e in Pythonx.Error ->
+      catch
+        :error, %{__struct__: Pythonx.Error, __exception__: _} = e ->
           IO.inspect("Pythonx error occurred: #{inspect(e)}")
           exit({:shutdown, 1})
       end
@@ -144,8 +147,8 @@ defmodule ExAtomVM.EsptoolHelper do
                 "size" => size
               }
             )
-          rescue
-            e in Pythonx.Error ->
+          catch
+            :error, %{__struct__: Pythonx.Error, __exception__: _} = e ->
               {:error, {:pythonx_error, "Pythonx error occurred: #{inspect(e)}"}}
           end) do
       {_result, %{"result" => result}} ->
@@ -177,8 +180,8 @@ defmodule ExAtomVM.EsptoolHelper do
               """,
               %{"address" => address, "data" => data, "port" => port}
             )
-          rescue
-            e in Pythonx.Error ->
+          catch
+            :error, %{__struct__: Pythonx.Error, __exception__: _} = e ->
               {:error, {:pythonx_error, "Pythonx error occurred: #{inspect(e)}"}}
           end) do
       {_result, %{"result" => result}} ->
@@ -272,8 +275,8 @@ defmodule ExAtomVM.EsptoolHelper do
                 "port" => port
               }
             )
-          rescue
-            e in Pythonx.Error ->
+          catch
+            :error, %{__struct__: Pythonx.Error, __exception__: _} = e ->
               {:error, {:pythonx_error, "Pythonx error occurred: #{inspect(e)}"}}
           end) do
       {_result, %{"result" => result}} ->
@@ -339,8 +342,8 @@ defmodule ExAtomVM.EsptoolHelper do
           """,
           %{"tool_args" => tool_args}
         )
-      rescue
-        e in Pythonx.Error ->
+      catch
+        :error, %{__struct__: Pythonx.Error, __exception__: _} = e ->
           IO.inspect("Pythonx error occurred: #{inspect(e)}")
           exit({:shutdown, 1})
       end
@@ -395,8 +398,8 @@ defmodule ExAtomVM.EsptoolHelper do
           """,
           %{}
         )
-      rescue
-        e in Pythonx.Error ->
+      catch
+        :error, %{__struct__: Pythonx.Error, __exception__: _} = e ->
           {:error, "Pythonx error occurred: #{inspect(e)}"}
       end
 
