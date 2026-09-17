@@ -23,16 +23,11 @@ defmodule Mix.Tasks.Atomvm.Esp32.Flash do
   $ mix atomvm.esp32.flash
   `
 
-  Or with optional flags (which will override the config in mix.exs)
+  The port is detected automatically. Optional flags override the config in mix.exs, for
+  example to name the port
 
   `
   $ mix atomvm.esp32.flash --port /dev/tty.usbserial-0001
-  `
-
-  Or detect the port automatically with
-
-  `
-  $ mix atomvm.esp32.flash --port auto
   `
 
   ## Configuration
@@ -45,7 +40,8 @@ defmodule Mix.Tasks.Atomvm.Esp32.Flash do
 
     * `:chip` - Chip type, defaults to `auto`.
 
-    * `:port` - The port to which device is connected on the host computer, defaults to `/dev/ttyUSB0`.
+    * `:port` - The port to which device is connected on the host computer, defaults to `auto`,
+      which detects it.
 
     * `:baud` - The BAUD rate used when flashing to device, defaults to `115200`.
 
@@ -70,7 +66,7 @@ defmodule Mix.Tasks.Atomvm.Esp32.Flash do
          {:pack, {:ok, _}} <- {:pack, Packbeam.run(args)},
          idf_path <- System.get_env("IDF_PATH", <<"">>) do
       chip = Map.get(options, :chip, Keyword.get(avm_config, :chip, "auto"))
-      port = Map.get(options, :port, Keyword.get(avm_config, :port, "/dev/ttyUSB0"))
+      port = Map.get(options, :port, Keyword.get(avm_config, :port, "auto"))
       baud = Map.get(options, :baud, Keyword.get(avm_config, :baud, "115200"))
 
       flash_offset =

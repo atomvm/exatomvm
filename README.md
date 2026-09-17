@@ -325,7 +325,7 @@ The `atomvm` properties list in the Mix project file (`mix.exs`) may contain the
 |-----|------|----------|-------|
 | `flash_offset` | Address in hexademical format | 0x250000 | The name of the module containing the `start/0` entrypoint function |
 | `chip` | `esp32` | `esp32` | Chip type |
-| `port` | device path | `/dev/ttyUSB0` | Port to which device is connected on host computer |
+| `port` | device path or `auto` | `auto` | Port to which device is connected on host computer; `auto` detects it |
 | `baud` | integer | 115200 | BAUD rate used when flashing to device |
 
 Properties in the `mix.exs` file may be over-ridden on the command line using long-style flags (prefixed by `--`) by the same name as the properties key.  For example, you can use the `--port` option to specify or override the `port` property in the above table.
