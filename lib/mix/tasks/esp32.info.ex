@@ -69,7 +69,7 @@ defmodule Mix.Tasks.Atomvm.Esp32.Info do
   defp format_build_info(build_info) when is_list(build_info) and length(build_info) == 5 do
     [version, target, time, date, sdk] =
       build_info
-      |> Enum.map(&sanitize_string/1)
+      |> Enum.map(&EsptoolHelper.sanitize_string/1)
 
     [
       "  Version: #{version}",
@@ -81,7 +81,7 @@ defmodule Mix.Tasks.Atomvm.Esp32.Info do
 
   defp format_build_info(build_info) when is_list(build_info) do
     build_info
-    |> Enum.map(&sanitize_string/1)
+    |> Enum.map(&EsptoolHelper.sanitize_string/1)
     |> Enum.with_index(1)
     |> Enum.map(fn {info, index} -> "  Info #{index}: #{info}" end)
   end
@@ -89,16 +89,4 @@ defmodule Mix.Tasks.Atomvm.Esp32.Info do
   defp format_build_info(_) do
     ["  Build info not available or corrupted"]
   end
-
-  defp sanitize_string(str) when is_binary(str) do
-    str
-    # Remove non-printable characters while preserving spaces
-    |> String.replace(~r/[^\x20-\x7E\s]/u, "")
-    |> case do
-      "" -> "<unreadable>"
-      sanitized -> sanitized
-    end
-  end
-
-  defp sanitize_string(_), do: "<invalid>"
 end

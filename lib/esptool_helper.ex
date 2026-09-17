@@ -79,8 +79,8 @@ defmodule ExAtomVM.EsptoolHelper do
                   exit_code = int(str(e))
                   result = exit_code == 0
               except Exception as e:
-                  print(f"Warning: {e}")
-                  result = True
+                  print(f"Error: {e}")
+                  result = False
 
           """,
           %{"tool_args" => tool_args}
@@ -337,7 +337,7 @@ defmodule ExAtomVM.EsptoolHelper do
                   exit_code = int(str(e))
                   result = exit_code == 0
               except Exception as e:
-                  print(f"Warning: {e}")
+                  print(f"Error: {e}")
                   result = False
           """,
           %{"tool_args" => tool_args}
@@ -394,13 +394,13 @@ defmodule ExAtomVM.EsptoolHelper do
                       })
               except Exception as e:
                   print(f"Error: {e}")
-                  result = []
           """,
           %{}
         )
       catch
         :error, %{__struct__: Pythonx.Error, __exception__: _} = e ->
-          {:error, "Pythonx error occurred: #{inspect(e)}"}
+          IO.puts("Pythonx error occurred: #{inspect(e)}")
+          exit({:shutdown, 1})
       end
 
     Pythonx.decode(globals["result"])
@@ -455,4 +455,37 @@ defmodule ExAtomVM.EsptoolHelper do
 
   def format_atomvm_status(true), do: "✅"
   def format_atomvm_status(_), do: "❌"
+
+  @doc """
+  Writes files at flash offsets, erasing nothing else, through the same
+  esptool path as flashing an image.
+  """
+  def write_flash_parts(port, baud, parts) do
+    files =
+      Enum.flat_map(parts, fn {offset, path} -> ["0x" <> Integer.to_string(offset, 16), path] end)
+
+    flash_pythonx(["--chip", "auto", "--port", port, "--baud", baud, "write-flash"] ++ files)
+  end
+
+  @doc """
+  The version string of the AtomVM build on a device, or nil without one.
+  """
+  def installed_version(%{"atomvm_installed" => true, "build_info" => [version | _]}) do
+    sanitize_string(version)
+  end
+
+  def installed_version(_device), do: nil
+
+  @doc false
+  def sanitize_string(str) when is_binary(str) do
+    str
+    # Remove non-printable characters while preserving spaces
+    |> String.replace(~r/[^\x20-\x7E\s]/u, "")
+    |> case do
+      "" -> "<unreadable>"
+      sanitized -> sanitized
+    end
+  end
+
+  def sanitize_string(_), do: "<invalid>"
 end
