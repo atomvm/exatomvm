@@ -120,6 +120,26 @@ defmodule ExAtomVM.Esp32FirmwareImagesTest do
     end
   end
 
+  describe "connected_chip/1" do
+    test "is the chip the connected boards share" do
+      s3 = %{"chip_family_name" => "ESP32-S3", "port" => "/dev/ttyACM0"}
+      c6 = %{"chip_family_name" => "ESP32-C6", "port" => "/dev/ttyACM1"}
+
+      assert Images.connected_chip([s3]) == {:ok, "esp32s3"}
+      assert Images.connected_chip([s3, %{s3 | "port" => "/dev/ttyACM2"}]) == {:ok, "esp32s3"}
+      assert Images.connected_chip([]) == {:error, :no_board}
+      assert Images.connected_chip([s3, c6]) == {:error, {:several_chips, ["esp32s3", "esp32c6"]}}
+    end
+
+    test "its errors point at --chip" do
+      for reason <- [:no_board, {:several_chips, ["esp32s3", "esp32c6"]}] do
+        assert Images.format_error(reason) =~ "--chip"
+      end
+
+      assert Images.format_error({:several_chips, ["esp32s3", "esp32c6"]}) =~ "esp32s3, esp32c6"
+    end
+  end
+
   describe "release_images/1" do
     test "keeps the ESP32 images with their download details" do
       images = Images.release_images(release("v0.6.6"))
@@ -966,6 +986,8 @@ defmodule ExAtomVM.Esp32FirmwareImagesTest do
             {:bootloader_newer, "v5.5.4", "v5.4.1"},
             {:pythonx_error, "Pythonx error occurred: x"},
             :flash_read_failed,
+            :no_board,
+            {:several_chips, ["esp32", "esp32s3"]},
             :something_else
           ] do
         message = Images.format_error(reason)

@@ -9,17 +9,32 @@ defmodule Mix.Tasks.Atomvm.Esp32.InstallTest do
     end
   end
 
-  test "rejects --list-images together with an image, a version or --update" do
-    message = "--list-images cannot be combined with --image, --version or --update"
+  test "rejects --list-images together with an image, a version, --update or --download-only" do
+    message =
+      "--list-images cannot be combined with --image, --version, --update or --download-only"
 
-    for args <- [["--version", "v0.6.6"], ["--image", "x.img"], ["--update"]] do
+    for args <- [["--version", "v0.6.6"], ["--image", "x.img"], ["--update"], ["--download-only"]] do
       assert_raise Mix.Error, message, fn -> Install.run(["--list-images" | args]) end
     end
   end
 
-  test "rejects --chip without --list-images" do
-    assert_raise Mix.Error, "--chip only applies to --list-images", fn ->
-      Install.run(["--chip", "esp32s3"])
+  test "rejects --chip where the chip is not needed" do
+    message = "--chip only applies to --list-images, and to --download-only without --image"
+
+    for args <- [[], ["--download-only", "--image", "AtomVM-esp32s3-elixir-v0.6.6"]] do
+      assert_raise Mix.Error, message, fn -> Install.run(["--chip", "esp32s3" | args]) end
+    end
+  end
+
+  test "rejects --download-only together with --update" do
+    assert_raise Mix.Error, "--download-only and --update cannot be used together", fn ->
+      Install.run(["--download-only", "--update"])
+    end
+  end
+
+  test "rejects --download-only with an image file" do
+    assert_raise Mix.Error, "--download-only needs a published image, mix.exs is a file", fn ->
+      Install.run(["--download-only", "--image", "mix.exs"])
     end
   end
 
@@ -29,6 +44,20 @@ defmodule Mix.Tasks.Atomvm.Esp32.InstallTest do
               Nightly builds and images with extra components and features (for example
               PSRAM support) are also available: mix atomvm.esp32.install --list-images
            """
+  end
+
+  test "does not claim to install when only downloading the latest release" do
+    hint = Install.latest_release_hint("v0.6.6", "Fetching")
+    assert hint =~ "Fetching AtomVM v0.6.6, the latest stable release."
+    refute hint =~ "Installing"
+  end
+
+  test "says where a downloaded image is and how to install it" do
+    path = "firmware_images/AtomVM-esp32s3-elixir-v0.6.6.img"
+    hint = Install.downloaded_hint(path)
+    assert hint =~ "#{path} is ready."
+    assert hint =~ "mix atomvm.esp32.install --image #{path}\n"
+    refute hint =~ ~r/[^\x00-\x7F]/
   end
 
   test "rejects a repository that is not OWNER/REPO" do

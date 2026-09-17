@@ -437,6 +437,14 @@ or when its bootloader comes from a newer ESP-IDF than the image, since such a
 bootloader does not start the older virtual machine; install the whole image
 then. A `main.avm` grown by `mix atomvm.esp32.expand` does not stand in the way.
 
+`--download-only` stops once the image is in `firmware_images/`, to install it
+later or offline, by the path the task prints. A release image is downloaded for
+the chip named with `--chip`, otherwise for the chip of the connected board; with
+`--chip` or `--image` neither a board nor `pythonx` is needed:
+
+    shell$ mix atomvm.esp32.install --download-only --chip esp32s3
+    shell$ mix atomvm.esp32.install --download-only --image AtomVM-esp32s3-atomgl-ipv6-libsodium-psram-nightly-0.7
+
 Downloaded images are verified against the checksums GitHub publishes and kept
 in `firmware_images/` at the root of the project, the builds of a repository
 given with `--repo` in a subdirectory named after it, so a nightly build stays

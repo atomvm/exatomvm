@@ -113,6 +113,14 @@ defmodule ExAtomVM.Esp32FirmwareImages do
     |> String.replace("-", "")
   end
 
+  def connected_chip(devices) do
+    case devices |> Enum.map(&chip_token(&1["chip_family_name"])) |> Enum.uniq() do
+      [chip] -> {:ok, chip}
+      [] -> {:error, :no_board}
+      chips -> {:error, {:several_chips, chips}}
+    end
+  end
+
   @doc """
   The images among the assets of a GitHub release, as returned by the API.
   """
@@ -1471,6 +1479,14 @@ defmodule ExAtomVM.Esp32FirmwareImages do
 
   def format_error({:pythonx_error, message}), do: message
   def format_error(:flash_read_failed), do: "reading the flash failed"
+
+  def format_error(:no_board) do
+    "no ESP32 board was found to tell the chip; name it with --chip, e.g. --chip esp32s3"
+  end
+
+  def format_error({:several_chips, chips}) do
+    "the connected boards have different chips (#{Enum.join(chips, ", ")}); pick one with --chip"
+  end
 
   def format_error(reason), do: inspect(reason)
 

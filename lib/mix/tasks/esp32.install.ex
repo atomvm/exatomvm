@@ -28,11 +28,16 @@ defmodule Mix.Tasks.Atomvm.Esp32.Install do
       Refused when the board runs no AtomVM, when its `factory` or `boot.avm` partition
       differs from the image's, or when its bootloader comes from a newer ESP-IDF than the
       image
+    * `--download-only` - Download the image into `firmware_images/` without installing it,
+      to install it later or offline (cannot be combined with `--update`). A release image is
+      downloaded for the chip given with `--chip`, otherwise for the chip of the connected
+      board; no board is needed with `--chip` or `--image`
     * `--list-images` - List the installable images instead: the latest stable release, newer
       prereleases, the nightly builds of atomvm-esp32-firmware-factory (with extra components
       and features such as PSRAM support), and the images on disk. With a connected board, only
       the images for its chip are listed.
-    * `--chip` - With `--list-images`, list the images for this chip, e.g. `esp32s3`, or `all`
+    * `--chip` - With `--list-images`, list the images for this chip, e.g. `esp32s3`, or `all`;
+      with `--download-only`, the chip to download the release image for
 
   ## Examples
 
@@ -58,6 +63,10 @@ defmodule Mix.Tasks.Atomvm.Esp32.Install do
       # NVS and the application
       mix atomvm.esp32.install --update
 
+      # Download the latest release for an ESP32-S3 without a board, to install
+      # it later
+      mix atomvm.esp32.install --download-only --chip esp32s3
+
       # Install with custom baud rate
       mix atomvm.esp32.install --baud 115200
 
@@ -77,8 +86,8 @@ defmodule Mix.Tasks.Atomvm.Esp32.Install do
   alias ExAtomVM.EsptoolHelper
 
   @usage "mix atomvm.esp32.install [--version TAG | --image FILE_OR_NAME] [--repo OWNER/REPO] " <>
-           "[--update] [--baud RATE], or mix atomvm.esp32.install --list-images [--chip CHIP] " <>
-           "[--repo OWNER/REPO]"
+           "[--update | --download-only [--chip CHIP]] [--baud RATE], or " <>
+           "mix atomvm.esp32.install --list-images [--chip CHIP] [--repo OWNER/REPO]"
 
   @partition_table_offset 0x8000
   @partition_table_size 0xC00
@@ -95,6 +104,7 @@ defmodule Mix.Tasks.Atomvm.Esp32.Install do
           baud: :string,
           repo: :string,
           update: :boolean,
+          download_only: :boolean,
           list_images: :boolean,
           chip: :string
         ]
@@ -107,24 +117,37 @@ defmodule Mix.Tasks.Atomvm.Esp32.Install do
     version = Keyword.get(opts, :version)
     source = repo_source(Keyword.get(opts, :repo))
     mode = if opts[:update], do: :update, else: :install
+    download_only? = Keyword.get(opts, :download_only, false)
 
     cond do
-      opts[:list_images] && (image || version || opts[:update]) ->
-        Mix.raise("--list-images cannot be combined with --image, --version or --update")
+      opts[:list_images] && (image || version || opts[:update] || download_only?) ->
+        Mix.raise(
+          "--list-images cannot be combined with --image, --version, --update or " <>
+            "--download-only"
+        )
 
       opts[:list_images] ->
         list_images(opts[:chip], source)
 
-      opts[:chip] ->
-        Mix.raise("--chip only applies to --list-images")
+      opts[:chip] && (image || !download_only?) ->
+        Mix.raise("--chip only applies to --list-images, and to --download-only without --image")
+
+      download_only? && opts[:update] ->
+        Mix.raise("--download-only and --update cannot be used together")
 
       image && version ->
         Mix.raise("--image and --version cannot be used together")
 
       image ->
         case Esp32FirmwareImages.classify_image_arg(image, source != nil) do
+          {:path, _path} when download_only? ->
+            Mix.raise("--download-only needs a published image, #{image} is a file")
+
           {:path, path} ->
             install({:path, path}, baud, source, mode)
+
+          {:name, image} when download_only? ->
+            download({:name, image}, nil, source)
 
           {:name, image} ->
             install({:name, image}, baud, source, mode)
@@ -135,6 +158,9 @@ defmodule Mix.Tasks.Atomvm.Esp32.Install do
                 "list them with --list-images"
             )
         end
+
+      download_only? ->
+        download({:release, version}, opts[:chip], source)
 
       true ->
         install({:release, version}, baud, source, mode)
@@ -237,6 +263,35 @@ defmodule Mix.Tasks.Atomvm.Esp32.Install do
     end
   end
 
+  defp download(selector, chip, source) do
+    with :ok <- check_dependencies(selector),
+         {:ok, chip} <- download_chip(selector, chip),
+         {:ok, image} <- resolve_image(selector, chip, source, "Fetching") do
+      IO.puts("\n" <> downloaded_hint(Path.relative_to_cwd(image.path)))
+    else
+      {:error, :req_not_available, message} ->
+        fail(message)
+
+      {:error, :pythonx_not_available, _message} ->
+        fail(
+          "Pythonx is not available to tell the chip of the connected board; " <>
+            "name it with --chip, e.g. --chip esp32s3"
+        )
+
+      {:error, reason} ->
+        fail(Esp32FirmwareImages.format_error(reason))
+    end
+  end
+
+  defp download_chip({:name, _image}, _chip), do: {:ok, nil}
+  defp download_chip({:release, _version}, chip) when is_binary(chip), do: {:ok, chip}
+
+  defp download_chip({:release, _version}, nil) do
+    with :ok <- EsptoolHelper.setup() do
+      Esp32FirmwareImages.connected_chip(EsptoolHelper.connected_devices())
+    end
+  end
+
   defp fail(message) do
     IO.puts("\nError: #{message}")
     exit({:shutdown, 1})
@@ -245,16 +300,20 @@ defmodule Mix.Tasks.Atomvm.Esp32.Install do
   defp check_dependencies({:path, _path}), do: :ok
   defp check_dependencies(_selector), do: check_req_dependency()
 
-  defp resolve_image({:release, version}, chip, source) do
+  defp resolve_image(selector, chip, source, doing \\ "Installing")
+
+  defp resolve_image({:release, version}, chip, source, doing) do
     {:ok, _} = Application.ensure_all_started(:req)
 
     with {:ok, image} <- release_image(chip, version, source || :atomvm) do
-      if version == nil and source == nil, do: IO.puts("\n" <> latest_release_hint(image.tag))
+      if version == nil and source == nil,
+        do: IO.puts("\n" <> latest_release_hint(image.tag, doing))
+
       cache(image)
     end
   end
 
-  defp resolve_image({:name, image}, _chip, source) do
+  defp resolve_image({:name, image}, _chip, source, _doing) do
     {:ok, _} = Application.ensure_all_started(:req)
 
     with {:ok, image} <- Esp32FirmwareImages.resolve(image, source) do
@@ -262,7 +321,7 @@ defmodule Mix.Tasks.Atomvm.Esp32.Install do
     end
   end
 
-  defp resolve_image({:path, path}, _chip, _source) do
+  defp resolve_image({:path, path}, _chip, _source, _doing) do
     if String.ends_with?(path, ".zip") do
       Esp32FirmwareImages.local_bundle(path)
     else
@@ -271,11 +330,19 @@ defmodule Mix.Tasks.Atomvm.Esp32.Install do
   end
 
   @doc false
-  def latest_release_hint(tag) do
+  def latest_release_hint(tag, doing \\ "Installing") do
     """
-    💡 Installing AtomVM #{tag}, the latest stable release.
+    💡 #{doing} AtomVM #{tag}, the latest stable release.
        Nightly builds and images with extra components and features (for example
        PSRAM support) are also available: mix atomvm.esp32.install --list-images
+    """
+  end
+
+  @doc false
+  def downloaded_hint(path) do
+    """
+    #{path} is ready. Install it, offline too, with:
+      mix atomvm.esp32.install --image #{path}
     """
   end
 
