@@ -65,6 +65,10 @@ defmodule Mix.Tasks.Atomvm.Esp32.Flash do
          {:args, {:ok, options}} <- {:args, parse_args(args)},
          {:pack, {:ok, _}} <- {:pack, Packbeam.run(args)},
          idf_path <- System.get_env("IDF_PATH", <<"">>) do
+      if Keyword.has_key?(avm_config, :flash_offset) do
+        IO.puts("warning: flash_offset in mix.exs is ignored, use esp32_flash_offset")
+      end
+
       chip = Map.get(options, :chip, Keyword.get(avm_config, :chip, "auto"))
       port = Map.get(options, :port, Keyword.get(avm_config, :port, "auto"))
       baud = Map.get(options, :baud, Keyword.get(avm_config, :baud, "115200"))

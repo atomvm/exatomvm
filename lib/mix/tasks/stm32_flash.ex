@@ -55,6 +55,10 @@ defmodule Mix.Tasks.Atomvm.Stm32.Flash do
          {:args, {:ok, options}} <- {:args, parse_args(args)},
          {:pack, {:ok, _}} <- {:pack, Packbeam.run(args)},
          stflash_path <- System.get_env("ATOMVM_MIX_PLUGIN_STFLASH", <<"">>) do
+      if Keyword.has_key?(avm_config, :flash_offset) do
+        IO.puts("warning: flash_offset in mix.exs is ignored, use stm32_flash_offset")
+      end
+
       flash_offset =
         Map.get(options, :flash_offset, Keyword.get(avm_config, :stm32_flash_offset, 0x8080000))
 
