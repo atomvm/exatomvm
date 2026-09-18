@@ -34,6 +34,15 @@ defmodule ExAtomVM.Esp32PartitionTable do
     end
   end
 
+  def find_data_partition(partition_table, partition_name)
+      when is_binary(partition_table) and is_binary(partition_name) do
+    with {:ok, _records, partitions} <- parse_records(partition_table),
+         {:ok, partition} <- find_partition(partitions, partition_name),
+         :ok <- validate_data_partition(partition) do
+      {:ok, partition}
+    end
+  end
+
   defp parse_records(partition_table) do
     if rem(byte_size(partition_table), @entry_size) == 0 do
       parse_records(partition_table, 0, [], [], [])

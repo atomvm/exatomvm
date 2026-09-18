@@ -23,11 +23,18 @@ defmodule Mix.Tasks.Atomvm.Esp32.Flash do
   $ mix atomvm.esp32.flash
   `
 
-  The port is detected automatically. Optional flags override the config in mix.exs, for
-  example to name the port
+  The port is detected automatically, and the application is written to the `main.avm`
+  partition of the board, found in its partition table; an application that does not fit in
+  it is refused. Optional flags override the config in mix.exs, for example to name the port
 
   `
   $ mix atomvm.esp32.flash --port /dev/tty.usbserial-0001
+  `
+
+  or to write the application to other partitions, for custom layouts and A/B partitioning
+
+  `
+  $ mix atomvm.esp32.flash --partition app_a,app_b
   `
 
   ## Configuration
@@ -35,8 +42,12 @@ defmodule Mix.Tasks.Atomvm.Esp32.Flash do
   ExAtomVM can be configured from the mix.ex file and supports the following settings for the
   `atomvm.esp32.flash` task.
 
-    * `:flash_offset` - The start address of the flash to write the application to in hexademical format,
-      defaults to `0x250000`.
+    * `:esp32_partition` - The partition of the board to write the application to, `main.avm` by
+      default, or a list of partitions that all receive it. `--partition NAME` or
+      `--partition NAME,NAME` overrides it.
+
+    * `:esp32_flash_offset` - An address such as `0x250000` to write the application to, instead
+      of a partition found on the board. `--flash_offset` overrides it.
 
     * `:chip` - Chip type, defaults to `auto`.
 
@@ -53,10 +64,17 @@ defmodule Mix.Tasks.Atomvm.Esp32.Flash do
   For example, you can use the `--port` option to specify or override the port property.
   """
 
+  alias ExAtomVM.Esp32PartitionTable
+  alias ExAtomVM.EsptoolHelper
   alias Mix.Project
   alias Mix.Tasks.Atomvm.Packbeam
 
   @esp_tool_path "/components/esptool_py/esptool/esptool.py"
+  @partition_name "main.avm"
+  @partition_table_offset 0x8000
+  @partition_table_size 0xC00
+  @partition_table_file "_build/atomvm_flash/partition_table.bin"
+  @pin_hint "Pin the address instead with --flash_offset 0x... or esp32_flash_offset: 0x... in mix.exs."
 
   def run(args) do
     config = Project.config()
@@ -65,14 +83,17 @@ defmodule Mix.Tasks.Atomvm.Esp32.Flash do
          {:args, {:ok, options}} <- {:args, parse_args(args)},
          {:pack, {:ok, _}} <- {:pack, Packbeam.run(args)},
          idf_path <- System.get_env("IDF_PATH", <<"">>) do
+      if Keyword.has_key?(avm_config, :flash_offset) do
+        IO.puts(
+          "warning: flash_offset in mix.exs is ignored; the #{@partition_name} partition of the board is used instead"
+        )
+      end
+
       chip = Map.get(options, :chip, Keyword.get(avm_config, :chip, "auto"))
       port = Map.get(options, :port, Keyword.get(avm_config, :port, "auto"))
       baud = Map.get(options, :baud, Keyword.get(avm_config, :baud, "115200"))
 
-      flash_offset =
-        Map.get(options, :flash_offset, Keyword.get(avm_config, :esp32_flash_offset, 0x250000))
-
-      flash(idf_path, chip, port, baud, flash_offset)
+      flash(idf_path, chip, port, baud, flash_target(options, avm_config))
     else
       {:atomvm, :error} ->
         IO.puts("error: missing AtomVM project config.")
@@ -88,8 +109,88 @@ defmodule Mix.Tasks.Atomvm.Esp32.Flash do
     end
   end
 
-  def flash(idf_path, chip, port, baud, flash_offset) do
-    tool_args = [
+  @doc false
+  def flash_target(options, avm_config) do
+    with nil <-
+           target(
+             Map.get(options, :flash_offset),
+             Map.get(options, :partition),
+             "--flash_offset and --partition cannot be used together"
+           ),
+         nil <-
+           target(
+             Keyword.get(avm_config, :esp32_flash_offset),
+             Keyword.get(avm_config, :esp32_partition),
+             "esp32_flash_offset and esp32_partition cannot both be set in mix.exs"
+           ) do
+      {:partitions, [@partition_name]}
+    end
+  end
+
+  defp target(nil, nil, _message), do: nil
+  defp target(address, nil, _message) when is_integer(address), do: {:offset, address}
+  defp target(nil, partitions, _message), do: {:partitions, partition_names(partitions)}
+
+  defp target(address, nil, _message) do
+    Mix.raise("esp32_flash_offset must be an address such as 0x250000, got #{inspect(address)}")
+  end
+
+  defp target(_address, _partitions, message), do: Mix.raise(message)
+
+  defp partition_names(names) do
+    names = List.wrap(names)
+
+    if names != [] and Enum.all?(names, &(is_binary(&1) and &1 != "")) do
+      Enum.uniq(names)
+    else
+      Mix.raise(
+        "esp32_partition must be a partition name or a list of names, got #{inspect(names)}"
+      )
+    end
+  end
+
+  def flash(idf_path, chip, port, baud, target) do
+    image = "#{Project.config()[:app]}.avm"
+
+    case Code.ensure_loaded(Pythonx) do
+      {:module, Pythonx} ->
+        IO.puts("Flashing using Pythonx installed esptool..")
+        :ok = EsptoolHelper.setup()
+        port = resolve_port(port)
+        offsets = resolve_target(target, image, fn -> read_partition_table_pythonx(port) end)
+
+        # avoid deprecation warnings, as we know we are esptool version 5+, when using Pythonx.
+        tool_args =
+          Enum.map(["--port", port | write_args(chip, baud, image, offsets)], fn
+            "--flash_mode" -> "--flash-mode"
+            "--flash_freq" -> "--flash-freq"
+            "--flash_size" -> "--flash-size"
+            "default_reset" -> "default-reset"
+            "hard_reset" -> "hard-reset"
+            "write_flash" -> "write-flash"
+            arg -> arg
+          end)
+
+        case EsptoolHelper.flash_pythonx(tool_args) do
+          true -> exit({:shutdown, 0})
+          false -> exit({:shutdown, 1})
+        end
+
+      _ ->
+        IO.puts("Flashing using esptool..")
+
+        offsets =
+          resolve_target(target, image, fn ->
+            read_partition_table_esptool(idf_path, port, chip, baud)
+          end)
+
+        {_output, status} = esptool(idf_path, port, write_args(chip, baud, image, offsets))
+        if status != 0, do: exit({:shutdown, 1})
+    end
+  end
+
+  defp write_args(chip, baud, image, offsets) do
+    [
       "--chip",
       chip,
       "--baud",
@@ -105,48 +206,173 @@ defmodule Mix.Tasks.Atomvm.Esp32.Flash do
       "--flash_freq",
       "keep",
       "--flash_size",
-      "detect",
-      "0x#{Integer.to_string(flash_offset, 16)}",
-      "#{Project.config()[:app]}.avm"
-    ]
+      "detect"
+    ] ++ Enum.flat_map(offsets, &[hex(&1), image])
+  end
 
-    tool_args = if port == "auto", do: tool_args, else: ["--port", port] ++ tool_args
+  defp resolve_target({:offset, address}, _image, _read_table), do: [address]
 
-    case Code.ensure_loaded(Pythonx) do
-      {:module, Pythonx} ->
-        IO.puts("Flashing using Pythonx installed esptool..")
-        ExAtomVM.EsptoolHelper.setup()
-
-        # avoid deprecation warnings, as we know we are esptool version 5+, when using Pythonx.
-        tool_args =
-          Enum.map(tool_args, fn
-            "--flash_mode" -> "--flash-mode"
-            "--flash_freq" -> "--flash-freq"
-            "--flash_size" -> "--flash-size"
-            "default_reset" -> "default-reset"
-            "hard_reset" -> "hard-reset"
-            "write_flash" -> "write-flash"
-            arg -> arg
-          end)
-
-        case ExAtomVM.EsptoolHelper.flash_pythonx(tool_args) do
-          true -> exit({:shutdown, 0})
-          false -> exit({:shutdown, 1})
-        end
-
-      _ ->
-        IO.puts("Flashing using esptool..")
-        tool_full_path = get_esptool_path(idf_path)
-        {tool_exec, prefix_args} = resolve_esptool_exec(tool_full_path, idf_path)
-
-        System.cmd(
-          tool_exec,
-          prefix_args ++ tool_args,
-          stderr_to_stdout: true,
-          into: IO.stream(:stdio, 1)
-        )
+  defp resolve_target({:partitions, names}, image, read_table) do
+    with {:ok, table} <- read_table.(),
+         {:ok, partitions} <- find_partitions(table, names),
+         :ok <- fits(partitions, File.stat!(image).size) do
+      Enum.map(partitions, fn partition ->
+        IO.puts("Found the #{partition.name} partition at #{hex(partition.offset)}")
+        partition.offset
+      end)
+    else
+      {:error, reason} -> fail(target_error(reason))
     end
   end
+
+  defp find_partitions(_table, []), do: {:ok, []}
+
+  defp find_partitions(table, [name | names]) do
+    with {:ok, partition} <- Esp32PartitionTable.find_data_partition(table, name),
+         {:ok, partitions} <- find_partitions(table, names) do
+      {:ok, [partition | partitions]}
+    end
+  end
+
+  @doc false
+  def fits(partitions, image_size) do
+    case Enum.find(partitions, &(&1.size < image_size)) do
+      nil -> :ok
+      partition -> {:error, {:too_large, partition, image_size}}
+    end
+  end
+
+  @doc false
+  def expand_hint do
+    """
+    💡 mix atomvm.esp32.expand grows main.avm to the end of the flash, when it is
+       the last partition, without touching anything else on the board
+    """
+  end
+
+  defp target_error({:too_large, %{name: @partition_name, size: size}, image_size}) do
+    "the application is #{image_size} bytes, the #{@partition_name} partition holds #{size}\n" <>
+      expand_hint()
+  end
+
+  defp target_error({:too_large, %{name: name, size: size}, image_size}) do
+    "the application is #{image_size} bytes, the #{name} partition holds #{size}"
+  end
+
+  defp target_error({:partition_not_found, @partition_name}) do
+    "the board has no #{@partition_name} partition, is AtomVM installed? " <>
+      "mix atomvm.esp32.install installs it.\n" <> @pin_hint
+  end
+
+  defp target_error({:partition_not_found, name}) do
+    "the board has no #{name} partition.\n" <> @pin_hint
+  end
+
+  defp target_error({:duplicate_partition, name}) do
+    "the board has more than one #{name} partition.\n" <> @pin_hint
+  end
+
+  defp target_error({:invalid_partition_type, name}) do
+    "the #{name} partition of the board is not a data partition.\n" <> @pin_hint
+  end
+
+  defp target_error(reason) when reason in [:invalid_partition_table, :corrupt_partition_data] do
+    "the partition table read from the board at #{hex(@partition_table_offset)} is invalid.\n" <>
+      @pin_hint
+  end
+
+  defp target_error({:esptool_exit, status}) do
+    "esptool.py could not read the partition table of the board (exit status #{status}).\n" <>
+      @pin_hint
+  end
+
+  defp target_error({:pythonx_error, message}) do
+    "could not read the partition table of the board: #{message}\n" <> @pin_hint
+  end
+
+  defp target_error(reason) do
+    "could not read the partition table of the board: #{inspect(reason)}\n" <> @pin_hint
+  end
+
+  defp read_partition_table_pythonx(port) do
+    with {:ok, info} <-
+           EsptoolHelper.read_flash_with_size(
+             port,
+             @partition_table_offset,
+             @partition_table_size,
+             false
+           ) do
+      {:ok, info["data"]}
+    end
+  end
+
+  defp read_partition_table_esptool(idf_path, port, chip, baud) do
+    File.mkdir_p!(Path.dirname(@partition_table_file))
+    File.rm(@partition_table_file)
+
+    args = [
+      "--chip",
+      chip,
+      "--baud",
+      baud,
+      "--before",
+      "default_reset",
+      "--after",
+      "no_reset",
+      "read_flash",
+      hex(@partition_table_offset),
+      hex(@partition_table_size),
+      @partition_table_file
+    ]
+
+    case esptool(idf_path, port, args) do
+      {_output, 0} -> File.read(@partition_table_file)
+      {_output, status} -> {:error, {:esptool_exit, status}}
+    end
+  end
+
+  defp esptool(idf_path, port, args) do
+    tool_full_path = get_esptool_path(idf_path)
+    {tool_exec, prefix_args} = resolve_esptool_exec(tool_full_path, idf_path)
+
+    System.cmd(tool_exec, prefix_args ++ port_args(port) ++ args,
+      stderr_to_stdout: true,
+      into: IO.stream(:stdio, 1)
+    )
+  end
+
+  defp resolve_port("auto") do
+    device = EsptoolHelper.select_device()
+
+    if not Map.get(device, "atomvm_installed", false) do
+      IO.puts("""
+
+        AtomVM doesn't seem to be installed on #{device["chip_family_name"]}!
+
+        Install using 'mix atomvm.esp32.install' or
+
+        https://doc.atomvm.org/main/getting-started-guide.html#flashing-a-binary-image-to-esp32
+
+        (override check using 'mix atomvm.esp32.flash --port #{device["port"]}')
+      """)
+
+      exit({:shutdown, 1})
+    end
+
+    device["port"]
+  end
+
+  defp resolve_port(port), do: port
+
+  defp port_args("auto"), do: []
+  defp port_args(port), do: ["--port", port]
+
+  defp fail(message) do
+    IO.puts("\nError: #{message}")
+    exit({:shutdown, 1})
+  end
+
+  defp hex(value), do: "0x" <> Integer.to_string(value, 16)
 
   defp get_esptool_path(<<"">>) do
     "esptool.py"
@@ -183,7 +409,8 @@ defmodule Mix.Tasks.Atomvm.Esp32.Flash do
     {python, [tool_full_path]}
   end
 
-  defp parse_args(args) do
+  @doc false
+  def parse_args(args) do
     parse_args(args, %{})
   end
 
@@ -203,12 +430,36 @@ defmodule Mix.Tasks.Atomvm.Esp32.Flash do
     parse_args(t, Map.put(accum, :chip, chip))
   end
 
-  defp parse_args([<<"--flash_offset">>, "0x" <> hex = _flash_offset | t], accum) do
-    {offset, _} = Integer.parse(hex, 16)
-    parse_args(t, Map.put(accum, :flash_offset, offset))
+  defp parse_args([<<"--flash_offset">>, address | t], accum) do
+    parse_args(t, Map.put(accum, :flash_offset, parse_address(address)))
+  end
+
+  defp parse_args([<<"--partition">>, names | t], accum) do
+    parse_args(t, Map.put(accum, :partition, parse_partitions(names)))
   end
 
   defp parse_args([_ | t], accum) do
     parse_args(t, accum)
+  end
+
+  defp parse_partitions(names) do
+    case names |> String.split(",") |> Enum.map(&String.trim/1) |> Enum.reject(&(&1 == "")) do
+      [] ->
+        Mix.raise(
+          "--partition expects one or more partition names, such as main.avm or app_a,app_b"
+        )
+
+      names ->
+        Enum.uniq(names)
+    end
+  end
+
+  defp parse_address(address) do
+    with "0x" <> hex <- address,
+         {value, ""} <- Integer.parse(hex, 16) do
+      value
+    else
+      _ -> Mix.raise("--flash_offset expects an address such as 0x250000, got #{address}")
+    end
   end
 end

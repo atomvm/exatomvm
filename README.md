@@ -48,7 +48,7 @@ Start by creating a Mix project
 
     Run "mix help" for more commands.
 
-Edit the generated `mix.exs` to include the ExAtomVM dependency (`{:exatomvm, git: "https://github.com/atomvm/ExAtomVM/"}`), and add a properties list using the `atomvm` key containing a `start` entry and optionally `esp32_flash_offset` and/or `stm32_flash_offset` entries (flash offset is not used by Raspberry Pi RP2 devices):
+Edit the generated `mix.exs` to include the ExAtomVM dependency (`{:exatomvm, git: "https://github.com/atomvm/ExAtomVM/"}`), and add a properties list using the `atomvm` key containing a `start` entry (the flash tasks document their optional entries below):
 
     ## elixir
     defmodule MyProject.MixProject do
@@ -62,9 +62,7 @@ Edit the generated `mix.exs` to include the ExAtomVM dependency (`{:exatomvm, gi
             start_permanent: Mix.env() == :prod,
             deps: deps(),
             atomvm: [
-              start: MyProject,
-              esp32_flash_offset: 0x250000,
-              stm32_flash_offset: 0x8080000
+              start: MyProject
             ]
         ]
         end
@@ -284,9 +282,7 @@ To use this Mix plugin, add `ExAtomVM` to the dependencies list in your `mix.exs
         ],
         ...
         atomvm: [
-            start: HelloWorld,
-            esp32_flash_offset: 0x250000,
-            stm32_flash_offset: 0x8080000
+            start: HelloWorld
         ]
       ]
     end
@@ -325,10 +321,18 @@ The `atomvm` properties list in the Mix project file (`mix.exs`) may contain the
 
 | Key | Type | Default | Value | Command line override |
 |-----|------|----------|------|-----------------------|
-| `esp32_flash_offset` | integer (hexademical format) | `0x250000` | The flash offset address to begin flashing to | `--flash_offset`|
+| `esp32_partition` | string or list of strings | `main.avm` | Partition of the board to write the application to, or several that all receive it | `--partition` |
+| `esp32_flash_offset` | integer (hexadecimal format) | none | Address to write the application to, instead of a partition found on the board | `--flash_offset` |
 | `chip` | string | `auto` | ESP32 chip variant | `--chip` |
 | `port` | device path or `auto` | `auto` | Port to which device is connected on host computer; `auto` detects it | `--port` |
 | `baud` | integer | `115200` | BAUD rate used when flashing to device | `--baud` |
+
+The application is written to the `main.avm` partition of the board, wherever the installed AtomVM image put it: the partition table is read from the board first. Other partitions are named with `--partition`, for custom layouts and A/B partitioning, and several receive the same application when named together:
+
+    shell$ mix atomvm.esp32.flash --partition app_b
+    shell$ mix atomvm.esp32.flash --partition app_a,app_b
+
+`esp32_flash_offset` pins an address instead and skips that read. An application bigger than its partition is refused; `mix atomvm.esp32.expand` grows a final `main.avm` partition to the end of the flash.
 
 If the `IDF_PATH` environment variable is set, then the `esptool.py` from the [IDF SDK](https://docs.espressif.com/projects/esp-idf/en/latest/esp32/index.html) installation will be used to flash the application to the ESP32 device.  Otherwise, this plugin will attempt to use the `esptool.py` program from the user's `PATH` environment variable.  The [ESP Tool](https://github.com/espressif/esptool) Python3 application can be installed from source or via many popular package managers.  Consult your local OS documentation for more information.
 
