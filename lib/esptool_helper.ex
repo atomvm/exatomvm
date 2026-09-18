@@ -444,6 +444,125 @@ defmodule ExAtomVM.EsptoolHelper do
   end
 
   @doc """
+  Shows what a board writes on its serial port, for the timeout in seconds
+  when one is given.
+  """
+  def monitor(port, baud, opts \\ []) do
+    reset = Keyword.get(opts, :reset, true)
+    timeout = Keyword.get(opts, :timeout)
+
+    case (try do
+            Pythonx.eval(
+              """
+              import codecs
+              import serial
+              import sys
+              import time
+
+              port = port.decode("utf-8")
+              deadline = None if timeout is None else time.monotonic() + timeout
+              decoder = codecs.getincrementaldecoder("utf-8")(errors="replace")
+              at_line_start = True
+
+
+              def expired():
+                  return deadline is not None and time.monotonic() >= deadline
+
+
+              def write(text):
+                  global at_line_start
+                  if text:
+                      sys.stdout.write(text)
+                      at_line_start = text.endswith("\\n")
+
+
+              def newline():
+                  if not at_line_start:
+                      write("\\n")
+
+
+              def set_line(name, value):
+                  # Pseudo terminals and some adapters have no control lines.
+                  try:
+                      setattr(ser, name, value)
+                      if name == "rts":
+                          # Windows' usbser.sys sends the lines only when DTR is written.
+                          ser.dtr = ser.dtr
+                  except OSError:
+                      pass
+
+
+              def open_port():
+                  # Both lines asserted while the port opens keep the board out of
+                  # reset, and so does releasing RTS before DTR.
+                  ser.rts = True
+                  ser.dtr = True
+                  ser.open()
+                  set_line("rts", False)
+                  set_line("dtr", False)
+
+
+              ser = serial.serial_for_url(
+                  port, baudrate=baud, timeout=0.1, exclusive=True, do_not_open=True
+              )
+
+              try:
+                  open_port()
+              except (serial.SerialException, OSError) as e:
+                  result = str(e)
+              else:
+                  result = None
+                  if reset:
+                      set_line("rts", True)
+                      time.sleep(0.1)
+                      set_line("rts", False)
+
+                  while not expired():
+                      try:
+                          data = ser.read(ser.in_waiting or 1)
+                      except (serial.SerialException, OSError):
+                          newline()
+                          write("Waiting for the board to reconnect")
+                          try:
+                              ser.close()
+                          except OSError:
+                              pass
+                          while not expired():
+                              time.sleep(0.5)
+                              try:
+                                  open_port()
+                                  break
+                              except (serial.SerialException, OSError):
+                                  write(".")
+                          write("\\n")
+                          decoder.reset()
+                          continue
+                      write(decoder.decode(data))
+
+                  newline()
+                  try:
+                      ser.close()
+                  except OSError:
+                      pass
+              """,
+              %{"port" => port, "baud" => baud, "reset" => reset, "timeout" => timeout}
+            )
+          catch
+            :error, %{__struct__: Pythonx.Error, __exception__: _} = e ->
+              {:error, {:pythonx_error, "Pythonx error occurred: #{inspect(e)}"}}
+          end) do
+      {_result, %{"result" => result}} ->
+        case Pythonx.decode(result) do
+          nil -> :ok
+          message -> {:error, {:serial_port, message}}
+        end
+
+      {:error, reason} ->
+        {:error, reason}
+    end
+  end
+
+  @doc """
   The version string of the AtomVM build on a device, or nil without one.
   """
   def installed_version(%{"atomvm_installed" => true, "build_info" => [version | _]}) do
