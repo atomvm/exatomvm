@@ -90,6 +90,64 @@ defmodule ExAtomVM.Esp32PartitionTableTest do
              Esp32PartitionTable.expand_partition(corrupt_table, "main.avm", 0x1000000)
   end
 
+  test "finds a data partition by name, whatever its subtype" do
+    partition_table =
+      build_partition_table([
+        partition("nvs", 0x01, 0x02, 0x9000, 0x6000),
+        partition("phy_init", 0x01, 0x01, 0xF000, 0x1000),
+        partition("factory", 0x00, 0x00, 0x10000, 0x170000),
+        partition("boot.avm", 0x01, 0x01, 0x180000, 0x180000),
+        partition("main.avm", 0x01, 0x01, 0x300000, 0x100000)
+      ])
+
+    assert {:ok, %{name: "main.avm", offset: 0x300000, size: 0x100000, type: 0x01}} =
+             Esp32PartitionTable.find_data_partition(partition_table, "main.avm")
+
+    assert {:ok, %{offset: 0x180000}} =
+             Esp32PartitionTable.find_data_partition(partition_table, "boot.avm")
+
+    assert {:error, {:partition_not_found, "app_b"}} =
+             Esp32PartitionTable.find_data_partition(partition_table, "app_b")
+
+    assert {:error, {:invalid_partition_type, "factory"}} =
+             Esp32PartitionTable.find_data_partition(partition_table, "factory")
+  end
+
+  test "finds nothing in an erased partition table" do
+    erased = :binary.copy(<<0xFF>>, 0xC00)
+
+    assert {:error, {:partition_not_found, "main.avm"}} =
+             Esp32PartitionTable.find_data_partition(erased, "main.avm")
+  end
+
+  test "refuses a duplicate partition name" do
+    partition_table =
+      build_partition_table([
+        partition("main.avm", 0x01, 0x01, 0x250000, 0x100000),
+        partition("main.avm", 0x01, 0x01, 0x350000, 0x100000)
+      ])
+
+    assert {:error, {:duplicate_partition, "main.avm"}} =
+             Esp32PartitionTable.find_data_partition(partition_table, "main.avm")
+  end
+
+  test "refuses an unreadable partition table when finding a partition" do
+    partition_table =
+      build_partition_table([partition("main.avm", 0x01, 0x01, 0x250000, 0x100000)])
+
+    <<head::binary-size(48), _digest_byte, rest::binary>> = partition_table
+    corrupt_table = head <> <<0>> <> rest
+
+    assert {:error, :invalid_partition_table} =
+             Esp32PartitionTable.find_data_partition(corrupt_table, "main.avm")
+
+    assert {:error, :invalid_partition_table} =
+             Esp32PartitionTable.find_data_partition(<<0::size(33 * 8)>>, "main.avm")
+
+    assert {:error, :corrupt_partition_data} =
+             Esp32PartitionTable.find_data_partition(<<0::size(32 * 8)>>, "main.avm")
+  end
+
   defp build_partition_table(entries) do
     data = IO.iodata_to_binary(entries)
     md5_entry = <<0xEB, 0xEB>> <> :binary.copy(<<0xFF>>, 14) <> :crypto.hash(:md5, data)
