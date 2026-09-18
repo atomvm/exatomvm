@@ -15,6 +15,23 @@ defmodule Mix.Tasks.Atomvm.Esp32.FlashTest do
     end
   end
 
+  test "refuses an image bigger than its partition" do
+    partition = %{name: "main.avm", offset: 0x250000, size: 0x100000}
+    bigger = %{name: "app_b", offset: 0x350000, size: 0x200000}
+
+    assert Flash.fits([partition, bigger], 0x100000) == :ok
+
+    assert Flash.fits([bigger, partition], 0x100001) ==
+             {:error, {:too_large, partition, 0x100001}}
+  end
+
+  test "points at atomvm.esp32.expand for a main.avm partition too small" do
+    assert Flash.expand_hint() == """
+           💡 mix atomvm.esp32.expand grows main.avm to the end of the flash, when it is
+              the last partition, without touching anything else on the board
+           """
+  end
+
   test "parses --flash_offset as a hexadecimal address" do
     assert Flash.parse_args(["--flash_offset", "0x250000", "--port", "/dev/ttyACM0"]) ==
              {:ok, %{flash_offset: 0x250000, port: "/dev/ttyACM0"}}

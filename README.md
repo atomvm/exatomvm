@@ -326,7 +326,7 @@ The `atomvm` properties list in the Mix project file (`mix.exs`) may contain the
 | `port` | device path or `auto` | `auto` | Port to which device is connected on host computer; `auto` detects it | `--port` |
 | `baud` | integer | `115200` | BAUD rate used when flashing to device | `--baud` |
 
-The application is written to the `main.avm` partition of the board, wherever the installed AtomVM image put it: the partition table is read from the board first. `esp32_flash_offset` pins an address instead and skips that read.
+The application is written to the `main.avm` partition of the board, wherever the installed AtomVM image put it: the partition table is read from the board first. `esp32_flash_offset` pins an address instead and skips that read. An application bigger than the partition is refused; `mix atomvm.esp32.expand` grows a final `main.avm` partition to the end of the flash.
 
 If the `IDF_PATH` environment variable is set, then the `esptool.py` from the [IDF SDK](https://docs.espressif.com/projects/esp-idf/en/latest/esp32/index.html) installation will be used to flash the application to the ESP32 device.  Otherwise, this plugin will attempt to use the `esptool.py` program from the user's `PATH` environment variable.  The [ESP Tool](https://github.com/espressif/esptool) Python3 application can be installed from source or via many popular package managers.  Consult your local OS documentation for more information.
 

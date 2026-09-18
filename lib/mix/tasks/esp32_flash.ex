@@ -24,8 +24,8 @@ defmodule Mix.Tasks.Atomvm.Esp32.Flash do
   `
 
   The port is detected automatically, and the application is written to the `main.avm`
-  partition of the board, found in its partition table. Optional flags override the config in
-  mix.exs, for example to name the port
+  partition of the board, found in its partition table; an application that does not fit in
+  it is refused. Optional flags override the config in mix.exs, for example to name the port
 
   `
   $ mix atomvm.esp32.flash --port /dev/tty.usbserial-0001
@@ -121,7 +121,7 @@ defmodule Mix.Tasks.Atomvm.Esp32.Flash do
         IO.puts("Flashing using Pythonx installed esptool..")
         :ok = EsptoolHelper.setup()
         port = resolve_port(port)
-        offsets = resolve_target(target, fn -> read_partition_table_pythonx(port) end)
+        offsets = resolve_target(target, image, fn -> read_partition_table_pythonx(port) end)
 
         # avoid deprecation warnings, as we know we are esptool version 5+, when using Pythonx.
         tool_args =
@@ -144,7 +144,7 @@ defmodule Mix.Tasks.Atomvm.Esp32.Flash do
         IO.puts("Flashing using esptool..")
 
         offsets =
-          resolve_target(target, fn ->
+          resolve_target(target, image, fn ->
             read_partition_table_esptool(idf_path, port, chip, baud)
           end)
 
@@ -174,16 +174,42 @@ defmodule Mix.Tasks.Atomvm.Esp32.Flash do
     ] ++ Enum.flat_map(offsets, &[hex(&1), image])
   end
 
-  defp resolve_target({:offset, address}, _read_table), do: [address]
+  defp resolve_target({:offset, address}, _image, _read_table), do: [address]
 
-  defp resolve_target({:partition, name}, read_table) do
+  defp resolve_target({:partition, name}, image, read_table) do
     with {:ok, table} <- read_table.(),
-         {:ok, partition} <- Esp32PartitionTable.find_data_partition(table, name) do
+         {:ok, partition} <- Esp32PartitionTable.find_data_partition(table, name),
+         :ok <- fits([partition], File.stat!(image).size) do
       IO.puts("Found the #{name} partition at #{hex(partition.offset)}")
       [partition.offset]
     else
       {:error, reason} -> fail(target_error(reason))
     end
+  end
+
+  @doc false
+  def fits(partitions, image_size) do
+    case Enum.find(partitions, &(&1.size < image_size)) do
+      nil -> :ok
+      partition -> {:error, {:too_large, partition, image_size}}
+    end
+  end
+
+  @doc false
+  def expand_hint do
+    """
+    💡 mix atomvm.esp32.expand grows main.avm to the end of the flash, when it is
+       the last partition, without touching anything else on the board
+    """
+  end
+
+  defp target_error({:too_large, %{name: @partition_name, size: size}, image_size}) do
+    "the application is #{image_size} bytes, the #{@partition_name} partition holds #{size}\n" <>
+      expand_hint()
+  end
+
+  defp target_error({:too_large, %{name: name, size: size}, image_size}) do
+    "the application is #{image_size} bytes, the #{name} partition holds #{size}"
   end
 
   defp target_error({:partition_not_found, @partition_name}) do
