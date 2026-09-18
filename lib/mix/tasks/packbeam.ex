@@ -6,6 +6,10 @@ defmodule Mix.Tasks.Atomvm.Packbeam do
   @moduledoc """
   Bundle an application into an AVM file that can be flashed to a micro-controller and (or directly on a unix host) executed by the AtomVM virtual machine.
 
+  Modules under `Mix.Tasks`, the project's own tasks and those of its dependencies, are left
+  out: they run on the build host, never on the device. A call into one of them from the code
+  that is packed is reported by `atomvm.check` as not available on AtomVM.
+
   > #### Info {: .info}
   >
   > Normally using this task manually is not required, it is called automatically by `atomvm.esp32.flash`, `atomvm.stm32.flash` and `atomvm.pico.flash`.
@@ -97,10 +101,12 @@ defmodule Mix.Tasks.Atomvm.Packbeam do
   end
 
   def beam_files(path) do
-    for file <- File.ls!(path), String.ends_with?(file, ".beam") do
+    for file <- File.ls!(path), String.ends_with?(file, ".beam"), not mix_task?(file) do
       Path.join(path, file)
     end
   end
+
+  defp mix_task?(file), do: String.starts_with?(file, "Elixir.Mix.Tasks.")
 
   defp pack_priv() do
     priv_dir_path =
@@ -150,13 +156,13 @@ defmodule Mix.Tasks.Atomvm.Packbeam do
   end
 
   defp pack_beams(beams_path, start_beam_file, out) do
+    start_beam = Path.join(beams_path, start_beam_file)
+
     beams_path
-    |> File.ls!()
-    |> Enum.filter(fn file -> String.ends_with?(file, ".beam") end)
-    |> List.delete(start_beam_file)
+    |> beam_files()
+    |> List.delete(start_beam)
     |> Enum.map(fn file -> {file, :beam} end)
-    |> List.insert_at(0, {start_beam_file, :beam_start})
-    |> Enum.map(fn {file, opts} -> {Path.join(Project.compile_path(), file), opts} end)
+    |> List.insert_at(0, {start_beam, :beam_start})
     |> Enum.concat([{"deps.avm", :avm}, {"priv.avm", :avm}])
     |> PackBEAM.make_avm(out)
   end

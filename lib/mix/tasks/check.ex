@@ -4,6 +4,7 @@ defmodule Mix.Tasks.Atomvm.Check do
 
   @moduledoc """
   Verifies that the functions and modules used are either part of the application source (or deps) or supported by AtomVM.
+  Modules under `Mix.Tasks` are not checked, since `Mix.Tasks.Atomvm.Packbeam` does not pack them.
 
   The check will catch the use of any standard Elixir modules or functions used in the application that are not included in exavmlib.
 
@@ -59,12 +60,8 @@ defmodule Mix.Tasks.Atomvm.Check do
   end
 
   defp extract_instructions(path) do
-    files = list_beam_files(path)
-
     exported_by_mod =
-      Enum.reduce(files, %{}, fn filename, acc ->
-        file_path = Path.join(path, filename)
-
+      Enum.reduce(Mix.Tasks.Atomvm.Packbeam.beam_files(path), %{}, fn file_path, acc ->
         {module_name, exported} =
           File.read!(file_path)
           |> :beam_disasm.file()
@@ -88,13 +85,14 @@ defmodule Mix.Tasks.Atomvm.Check do
   defp test_name(:is_ne_exact), do: :is_not_eq_exact
   defp test_name(test), do: test
 
-  defp extract_ext_calls({:beam_file, module_name, _, _, _, code}) do
+  @doc false
+  def extract_ext_calls({:beam_file, module_name, _, _, _, code}) do
     ext_calls =
       scan_instructions(code, fn
         {:call_ext, _, {:extfunc, module, extfunc, arity}}, acc ->
           [{module, extfunc, arity} | acc]
 
-        {:call_ext_last, _, {:extfunc, module, extfunc, arity}}, acc ->
+        {:call_ext_last, _, {:extfunc, module, extfunc, arity}, _}, acc ->
           [{module, extfunc, arity} | acc]
 
         {:call_ext_only, _, {:extfunc, module, extfunc, arity}}, acc ->
@@ -147,12 +145,8 @@ defmodule Mix.Tasks.Atomvm.Check do
   end
 
   defp extract_calls(path) do
-    files = list_beam_files(path)
-
     calls_by_mod =
-      Enum.reduce(files, %{}, fn filename, acc ->
-        file_path = Path.join(path, filename)
-
+      Enum.reduce(Mix.Tasks.Atomvm.Packbeam.beam_files(path), %{}, fn file_path, acc ->
         {module_name, ext_calls} =
           File.read!(file_path)
           |> :beam_disasm.file()
@@ -228,12 +222,6 @@ defmodule Mix.Tasks.Atomvm.Check do
     |> Enum.map(fn s -> "* #{s}" end)
     |> Enum.join("\n")
     |> IO.puts()
-  end
-
-  defp list_beam_files(path) do
-    path
-    |> File.ls!()
-    |> Enum.filter(&String.ends_with?(&1, ".beam"))
   end
 
   defp scan_instructions(code, fun) do
