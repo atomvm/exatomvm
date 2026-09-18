@@ -114,16 +114,15 @@ defmodule Mix.Tasks.Atomvm.Esp32.Flash do
       "#{Project.config()[:app]}.avm"
     ]
 
-    tool_args = if port == "auto", do: tool_args, else: ["--port", port] ++ tool_args
-
     case Code.ensure_loaded(Pythonx) do
       {:module, Pythonx} ->
         IO.puts("Flashing using Pythonx installed esptool..")
-        ExAtomVM.EsptoolHelper.setup()
+        :ok = ExAtomVM.EsptoolHelper.setup()
+        port = resolve_port(port)
 
         # avoid deprecation warnings, as we know we are esptool version 5+, when using Pythonx.
         tool_args =
-          Enum.map(tool_args, fn
+          Enum.map(["--port", port | tool_args], fn
             "--flash_mode" -> "--flash-mode"
             "--flash_freq" -> "--flash-freq"
             "--flash_size" -> "--flash-size"
@@ -145,12 +144,38 @@ defmodule Mix.Tasks.Atomvm.Esp32.Flash do
 
         System.cmd(
           tool_exec,
-          prefix_args ++ tool_args,
+          prefix_args ++ port_args(port) ++ tool_args,
           stderr_to_stdout: true,
           into: IO.stream(:stdio, 1)
         )
     end
   end
+
+  defp resolve_port("auto") do
+    device = ExAtomVM.EsptoolHelper.select_device()
+
+    if not Map.get(device, "atomvm_installed", false) do
+      IO.puts("""
+
+        AtomVM doesn't seem to be installed on #{device["chip_family_name"]}!
+
+        Install using 'mix atomvm.esp32.install' or
+
+        https://doc.atomvm.org/main/getting-started-guide.html#flashing-a-binary-image-to-esp32
+
+        (override check using 'mix atomvm.esp32.flash --port #{device["port"]}')
+      """)
+
+      exit({:shutdown, 1})
+    end
+
+    device["port"]
+  end
+
+  defp resolve_port(port), do: port
+
+  defp port_args("auto"), do: []
+  defp port_args(port), do: ["--port", port]
 
   defp get_esptool_path(<<"">>) do
     "esptool.py"

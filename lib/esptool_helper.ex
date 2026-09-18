@@ -35,30 +35,6 @@ defmodule ExAtomVM.EsptoolHelper do
   def flash_pythonx(tool_args) do
     # https://github.com/espressif/esptool/blob/master/docs/en/esptool/scripting.rst
 
-    tool_args =
-      if not Enum.member?(tool_args, "--port") do
-        selected_device = select_device()
-
-        if not Map.get(selected_device, "atomvm_installed", false) do
-          IO.puts("""
-
-            AtomVM doesn't seem to be installed on #{selected_device["chip_family_name"]}!
-
-            Install using 'mix atomvm.esp32.install' or
-
-            https://doc.atomvm.org/main/getting-started-guide.html#flashing-a-binary-image-to-esp32
-
-            (override check using 'mix atomvm.esp32.flash --port #{selected_device["port"]}')
-          """)
-
-          exit({:shutdown, 1})
-        end
-
-        ["--port", selected_device["port"]] ++ tool_args
-      else
-        tool_args
-      end
-
     {_result, globals} =
       try do
         Pythonx.eval(
