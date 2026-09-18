@@ -105,6 +105,10 @@ Run `mix deps.get` to download ExAtomVM into your `deps` directory:
     remote: Total 150 (delta 14), reused 19 (delta 10), pack-reused 121
     origin/HEAD set to master
 
+From now on `mix atomvm` shows the steps of a project and the tasks of each
+board, and `mix atomvm.esp32`, `mix atomvm.stm32` and `mix atomvm.pico` the
+steps of one board.
+
 Create a directory called `avm_deps` in the top level of your project directory:
 
     shell$ mkdir avm_deps
@@ -288,6 +292,61 @@ To use this Mix plugin, add `ExAtomVM` to the dependencies list in your `mix.exs
     end
 
 In addition, you may specify AtomVM-specific configuration using the `atomvm` tag.  The fields in this properties list are described in more detail below.
+
+### The `atomvm` task
+
+`mix atomvm` shows how an application reaches a board, and lists the tasks
+grouped by board:
+
+    shell$ mix atomvm
+    An application reaches a board in three steps.
+
+      1. Name the module AtomVM starts in the atomvm section of mix.exs.
+
+             atomvm: [start: MyProject]
+
+         That module must define start/0, which AtomVM calls when the board
+         boots.
+
+      2. Install AtomVM on the board. This is done once.
+
+      3. Flash the application, then watch its console.
+
+    Steps 2 and 3 differ from board to board:
+
+        mix atomvm.esp32
+        mix atomvm.stm32
+        mix atomvm.pico
+
+    Each task documents its own options:
+
+        mix help TASK
+
+    ESP32:
+      mix atomvm.esp32.build       # Build AtomVM for ESP32 from source
+      mix atomvm.esp32.erase_flash # Erase flash of ESP32
+      mix atomvm.esp32.expand      # Expand the ESP32 main.avm partition to fill flash
+      mix atomvm.esp32.flash       # Flash the application to an ESP32 micro-controller
+      mix atomvm.esp32.info        # Get information about connected ESP32 devices
+      mix atomvm.esp32.install     # Install AtomVM to ESP32 device
+      mix atomvm.esp32.monitor     # Show the console output of an ESP32 board
+
+    STM32:
+      mix atomvm.stm32.flash       # Flash the application to a stm32 micro-controller
+
+    Raspberry Pi Pico:
+      mix atomvm.pico.flash        # Flash the application to a pico micro-controller
+
+    Any board:
+      mix atomvm.check             # Check application code for use of unsupported instructions
+      mix atomvm.packbeam          # Bundle the application into an AVM file
+      mix atomvm.uf2create         # Create uf2 files appropriate for pico devices from a packed .avm application file
+
+`mix atomvm.esp32`, `mix atomvm.stm32` and `mix atomvm.pico` show the steps of
+one board, its tasks and the dependencies they need.
+
+A task that needs the `atomvm` section of `mix.exs` and does not find it prints
+what to add to it.
 
 ### The `atomvm.packbeam` task
 
