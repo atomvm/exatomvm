@@ -88,13 +88,14 @@ defmodule Mix.Tasks.Atomvm.Check do
   defp test_name(:is_ne_exact), do: :is_not_eq_exact
   defp test_name(test), do: test
 
-  defp extract_ext_calls({:beam_file, module_name, _, _, _, code}) do
+  @doc false
+  def extract_ext_calls({:beam_file, module_name, _, _, _, code}) do
     ext_calls =
       scan_instructions(code, fn
         {:call_ext, _, {:extfunc, module, extfunc, arity}}, acc ->
           [{module, extfunc, arity} | acc]
 
-        {:call_ext_last, _, {:extfunc, module, extfunc, arity}}, acc ->
+        {:call_ext_last, _, {:extfunc, module, extfunc, arity}, _}, acc ->
           [{module, extfunc, arity} | acc]
 
         {:call_ext_only, _, {:extfunc, module, extfunc, arity}}, acc ->
