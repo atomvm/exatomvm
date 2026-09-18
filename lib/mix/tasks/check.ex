@@ -13,6 +13,7 @@ defmodule Mix.Tasks.Atomvm.Check do
   > Note. The `Mix.Tasks.Atomvm.Packbeam` task depends on this one, so users will likely never need to use it directly.
   """
 
+  alias ExAtomVM.TaskHelp
   alias Mix.Project
 
   # beam_disasm gives the float arithmetic opcodes and raise the same
@@ -25,10 +26,24 @@ defmodule Mix.Tasks.Atomvm.Check do
 
     beams_path = Project.compile_path()
 
+    :ok = check_dependency()
     :ok = check_instructions(beams_path)
     :ok = check_ext_calls(beams_path)
 
     {:ok, []}
+  end
+
+  defp check_dependency do
+    if not declared?(Project.config()[:deps]) do
+      IO.puts(TaskHelp.missing_dependency())
+    end
+
+    :ok
+  end
+
+  @doc false
+  def declared?(deps) do
+    Enum.any?(List.wrap(deps), fn dep -> is_tuple(dep) and elem(dep, 0) == :atomvm end)
   end
 
   defp extract_instructions({:beam_file, module_name, _exported_funcs, _, _, code}) do
