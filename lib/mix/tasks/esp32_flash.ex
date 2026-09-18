@@ -31,13 +31,23 @@ defmodule Mix.Tasks.Atomvm.Esp32.Flash do
   $ mix atomvm.esp32.flash --port /dev/tty.usbserial-0001
   `
 
+  or to write the application to other partitions, for custom layouts and A/B partitioning
+
+  `
+  $ mix atomvm.esp32.flash --partition app_a,app_b
+  `
+
   ## Configuration
 
   ExAtomVM can be configured from the mix.ex file and supports the following settings for the
   `atomvm.esp32.flash` task.
 
+    * `:esp32_partition` - The partition of the board to write the application to, `main.avm` by
+      default, or a list of partitions that all receive it. `--partition NAME` or
+      `--partition NAME,NAME` overrides it.
+
     * `:esp32_flash_offset` - An address such as `0x250000` to write the application to, instead
-      of the `main.avm` partition found on the board. `--flash_offset` overrides it.
+      of a partition found on the board. `--flash_offset` overrides it.
 
     * `:chip` - Chip type, defaults to `auto`.
 
@@ -101,15 +111,41 @@ defmodule Mix.Tasks.Atomvm.Esp32.Flash do
 
   @doc false
   def flash_target(options, avm_config) do
-    case Map.get(options, :flash_offset, Keyword.get(avm_config, :esp32_flash_offset)) do
-      nil ->
-        {:partition, @partition_name}
+    with nil <-
+           target(
+             Map.get(options, :flash_offset),
+             Map.get(options, :partition),
+             "--flash_offset and --partition cannot be used together"
+           ),
+         nil <-
+           target(
+             Keyword.get(avm_config, :esp32_flash_offset),
+             Keyword.get(avm_config, :esp32_partition),
+             "esp32_flash_offset and esp32_partition cannot both be set in mix.exs"
+           ) do
+      {:partitions, [@partition_name]}
+    end
+  end
 
-      address when is_integer(address) ->
-        {:offset, address}
+  defp target(nil, nil, _message), do: nil
+  defp target(address, nil, _message) when is_integer(address), do: {:offset, address}
+  defp target(nil, partitions, _message), do: {:partitions, partition_names(partitions)}
 
-      other ->
-        Mix.raise("esp32_flash_offset must be an address such as 0x250000, got #{inspect(other)}")
+  defp target(address, nil, _message) do
+    Mix.raise("esp32_flash_offset must be an address such as 0x250000, got #{inspect(address)}")
+  end
+
+  defp target(_address, _partitions, message), do: Mix.raise(message)
+
+  defp partition_names(names) do
+    names = List.wrap(names)
+
+    if names != [] and Enum.all?(names, &(is_binary(&1) and &1 != "")) do
+      Enum.uniq(names)
+    else
+      Mix.raise(
+        "esp32_partition must be a partition name or a list of names, got #{inspect(names)}"
+      )
     end
   end
 
@@ -176,14 +212,25 @@ defmodule Mix.Tasks.Atomvm.Esp32.Flash do
 
   defp resolve_target({:offset, address}, _image, _read_table), do: [address]
 
-  defp resolve_target({:partition, name}, image, read_table) do
+  defp resolve_target({:partitions, names}, image, read_table) do
     with {:ok, table} <- read_table.(),
-         {:ok, partition} <- Esp32PartitionTable.find_data_partition(table, name),
-         :ok <- fits([partition], File.stat!(image).size) do
-      IO.puts("Found the #{name} partition at #{hex(partition.offset)}")
-      [partition.offset]
+         {:ok, partitions} <- find_partitions(table, names),
+         :ok <- fits(partitions, File.stat!(image).size) do
+      Enum.map(partitions, fn partition ->
+        IO.puts("Found the #{partition.name} partition at #{hex(partition.offset)}")
+        partition.offset
+      end)
     else
       {:error, reason} -> fail(target_error(reason))
+    end
+  end
+
+  defp find_partitions(_table, []), do: {:ok, []}
+
+  defp find_partitions(table, [name | names]) do
+    with {:ok, partition} <- Esp32PartitionTable.find_data_partition(table, name),
+         {:ok, partitions} <- find_partitions(table, names) do
+      {:ok, [partition | partitions]}
     end
   end
 
@@ -387,8 +434,24 @@ defmodule Mix.Tasks.Atomvm.Esp32.Flash do
     parse_args(t, Map.put(accum, :flash_offset, parse_address(address)))
   end
 
+  defp parse_args([<<"--partition">>, names | t], accum) do
+    parse_args(t, Map.put(accum, :partition, parse_partitions(names)))
+  end
+
   defp parse_args([_ | t], accum) do
     parse_args(t, accum)
+  end
+
+  defp parse_partitions(names) do
+    case names |> String.split(",") |> Enum.map(&String.trim/1) |> Enum.reject(&(&1 == "")) do
+      [] ->
+        Mix.raise(
+          "--partition expects one or more partition names, such as main.avm or app_a,app_b"
+        )
+
+      names ->
+        Enum.uniq(names)
+    end
   end
 
   defp parse_address(address) do
