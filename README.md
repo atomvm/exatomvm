@@ -21,7 +21,7 @@ To flash an ExAtomVM project to an ESP32, you will need:
 * An ESP32 development module such as the Espressif DevKit C
 * A USB cable to connect the ESP32 development module to your workstation
 * [esptool](https://github.com/espressif/esptool)
-* (Optional) A serial console program, such as `minicom`
+* (Optional) A serial console program, such as `minicom`, or the `pythonx` dependency for `mix atomvm.esp32.monitor`
 
 Consult your local package manager for installation of these tools.
 
@@ -187,9 +187,9 @@ To flash your project to an ESP32 device, use the `atomvm.esp32.flash` mix task.
     Hard resetting via RTS pin...
 
 
-(Optional) To view the console output of your application, use a serial console program, such as `minicom`:
+(Optional) To view the console output of your application, use the `atomvm.esp32.monitor` task, which resets the board and shows its output from the boot messages on, or a serial console program, such as `minicom`:
 
-    shell$ minicom -D /dev/tty.usbserial
+    shell$ mix atomvm.esp32.monitor
     rst:0x1 (POWERON_RESET),boot:0x13 (SPI_FAST_FLASH_BOOT)
     configsip: 0, SPIWP:0xee
     clk_drv:0x00,q_drv:0x00,d_drv:0x00,cs0_drv:0x00,hd_drv:0x00,wp_drv:0x00
@@ -363,6 +363,32 @@ Example:
 
     Leaving...
     Hard resetting via RTS pin...
+
+### The `atomvm.esp32.monitor` task
+
+The `atomvm.esp32.monitor` task shows the console output of a connected ESP32
+board, so that no serial console program is needed. It needs the optional
+`pythonx` dependency:
+
+    {:pythonx, "~> 0.4.0", runtime: false}
+
+The port is opened without resetting the board, then the board is reset, so
+that its output is shown from the boot messages on:
+
+    shell$ mix atomvm.esp32.monitor
+
+`--no-reset` leaves the board running and shows its output from now on, and
+`--port` names the port when the configured or detected one is not the wanted
+one. The console runs at 115200 baud; `--baud` changes that, the `baud` key of
+`mix.exs` being the flashing speed. A board that disappears, as boards
+connected through their native USB port do while they reset, is waited for.
+
+    shell$ mix atomvm.esp32.monitor --no-reset --port /dev/ttyACM0
+
+The task runs until Ctrl+C, pressed twice, or for the number of seconds given
+with `--timeout`, for scripts:
+
+    shell$ mix atomvm.esp32.monitor --timeout 10
 
 ### The `atomvm.esp32.expand` task
 
