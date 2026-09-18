@@ -35,8 +35,8 @@ defmodule Mix.Tasks.Atomvm.Esp32.Flash do
   ExAtomVM can be configured from the mix.ex file and supports the following settings for the
   `atomvm.esp32.flash` task.
 
-    * `:flash_offset` - The start address of the flash to write the application to in hexademical format,
-      defaults to `0x250000`.
+    * `:esp32_flash_offset` - The start address of the flash to write the application to in hexadecimal
+      format, defaults to `0x250000`. `--flash_offset` overrides it.
 
     * `:chip` - Chip type, defaults to `auto`.
 
