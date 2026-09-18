@@ -139,16 +139,19 @@ defmodule Mix.Tasks.Atomvm.Esp32.Flash do
 
       _ ->
         IO.puts("Flashing using esptool..")
-        tool_full_path = get_esptool_path(idf_path)
-        {tool_exec, prefix_args} = resolve_esptool_exec(tool_full_path, idf_path)
-
-        System.cmd(
-          tool_exec,
-          prefix_args ++ port_args(port) ++ tool_args,
-          stderr_to_stdout: true,
-          into: IO.stream(:stdio, 1)
-        )
+        {_output, status} = esptool(idf_path, port, tool_args)
+        if status != 0, do: exit({:shutdown, 1})
     end
+  end
+
+  defp esptool(idf_path, port, args) do
+    tool_full_path = get_esptool_path(idf_path)
+    {tool_exec, prefix_args} = resolve_esptool_exec(tool_full_path, idf_path)
+
+    System.cmd(tool_exec, prefix_args ++ port_args(port) ++ args,
+      stderr_to_stdout: true,
+      into: IO.stream(:stdio, 1)
+    )
   end
 
   defp resolve_port("auto") do
