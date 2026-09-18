@@ -38,6 +38,7 @@ defmodule Mix.Tasks.Atomvm.Packbeam do
   """
 
   alias ExAtomVM.PackBEAM
+  alias ExAtomVM.TaskHelp
   alias Mix.Project
   alias Mix.Tasks.Atomvm.Check
 
@@ -59,11 +60,11 @@ defmodule Mix.Tasks.Atomvm.Packbeam do
         :error
 
       {:atomvm, :error} ->
-        IO.puts("error: missing AtomVM project config.")
+        IO.puts(TaskHelp.missing_config())
         :error
 
       {:start, :error} ->
-        IO.puts("error: missing startup module.")
+        IO.puts(TaskHelp.missing_start())
         :error
 
       nil ->

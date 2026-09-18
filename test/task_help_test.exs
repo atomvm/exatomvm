@@ -3,6 +3,8 @@ defmodule ExAtomVM.TaskHelpTest do
 
   import ExUnit.CaptureIO
 
+  alias ExAtomVM.TaskHelp
+
   @pages [
     Mix.Tasks.Atomvm,
     Mix.Tasks.Atomvm.Esp32,
@@ -10,16 +12,25 @@ defmodule ExAtomVM.TaskHelpTest do
     Mix.Tasks.Atomvm.Pico
   ]
 
-  test "every page is a printable text that fits a terminal" do
-    for module <- @pages do
-      text = Mix.Task.moduledoc(module)
+  test "the advice names the module the project has to start" do
+    for {app, module} <- [my_project: "MyProject", blinky: "Blinky"],
+        advice <- [TaskHelp.missing_config(app), TaskHelp.missing_start(app)] do
+      assert advice =~ module
+    end
 
+    assert TaskHelp.missing_config(:my_project) =~ "my_project"
+  end
+
+  test "every page and every advice is a printable text that fits a terminal" do
+    pages = Enum.map(@pages, &Mix.Task.moduledoc/1)
+    advice = [TaskHelp.missing_config(:my_project), TaskHelp.missing_start(:my_project)]
+
+    for text <- pages ++ advice do
       assert is_binary(text) and text != ""
       assert String.printable?(text)
 
       for line <- String.split(text, "\n") do
-        assert String.length(line) <= 80,
-               "#{inspect(module)} has a line of #{String.length(line)}"
+        assert String.length(line) <= 80, "a line of #{String.length(line)}: #{line}"
       end
     end
   end

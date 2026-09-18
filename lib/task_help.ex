@@ -24,6 +24,51 @@ defmodule ExAtomVM.TaskHelp do
     list("Tasks", tasks, width(tasks))
   end
 
+  def missing_config(app \\ Mix.Project.config()[:app]) do
+    module = start_module(app)
+
+    """
+    error: missing AtomVM project config.
+
+    💡 mix.exs needs an atomvm section naming the module AtomVM starts:
+
+         def project do
+           [
+             app: :#{app},
+             ...
+             atomvm: [start: #{module}]
+           ]
+         end
+
+       #{module} must define start/0, which AtomVM calls when the board boots:
+
+         defmodule #{module} do
+           def start do
+             IO.puts("Hello")
+           end
+         end
+
+       The steps that follow: mix atomvm
+    """
+  end
+
+  def missing_start(app \\ Mix.Project.config()[:app]) do
+    module = start_module(app)
+
+    """
+    error: missing startup module.
+
+    💡 The atomvm section of mix.exs must name the module AtomVM starts:
+
+         atomvm: [start: #{module}]
+
+       #{module} must define start/0, which AtomVM calls when the board boots.
+       The steps that follow: mix atomvm
+    """
+  end
+
+  defp start_module(app), do: Macro.camelize(Atom.to_string(app))
+
   defp tasks(prefix) do
     found =
       for module <- Mix.Task.load_all(),
