@@ -7,13 +7,13 @@ defmodule Mix.Tasks.Atomvm.Esp32.Build do
   ## Requirements
 
   **General requirements**
-    * Erlang/OTP (25 or later)
-    * Elixir (1.16 or later)
+    * Erlang/OTP (27 or later)
+    * Elixir (1.18 or later)
     * Git
-
-  **Without Docker:**
     * CMake (3.13 or later)
     * Ninja (preferred) or Make
+
+  **Without Docker:**
     * ESP-IDF (v5.5.4 or later recommended)
 
   **With Docker (--use-docker flag):**
@@ -32,6 +32,13 @@ defmodule Mix.Tasks.Atomvm.Esp32.Build do
     * `--idf-version` - ESP-IDF version for Docker image (default: v5.5.4)
     * `--clean` - Clean build directory before building
     * `--mbedtls-prefix` - Path to custom MbedTLS installation (optional, falls back to MBEDTLS_PREFIX env var)
+    * `--partition-table` - Path to custom partition table CSV file (optional, defaults to custom_partitions.csv if present)
+    * `--sdkconfig` - Path to custom sdkconfig.defaults file (optional, defaults to sdkconfig.defaults if present)
+
+  If `--partition-table` is provided, or if your Mix project root contains `custom_partitions.csv`,
+  it will be used as the ESP32 partition table for the build. ExAtomVM passes the contents
+  through unchanged, without imposing partition names, types, offsets, or sizes. The selected
+  file must be readable, non-empty, and regular; AtomVM and ESP-IDF handle its contents.
 
   ## Examples
 
@@ -59,6 +66,9 @@ defmodule Mix.Tasks.Atomvm.Esp32.Build do
       # Build with custom MbedTLS
       mix atomvm.esp32.build --atomvm-path /path/to/AtomVM --mbedtls-prefix /usr/local/opt/mbedtls@3
 
+      # Build with custom sdkconfig defaults
+      mix atomvm.esp32.build --sdkconfig path/to/my_config.defaults
+
       # Build from a pull request (shorthand)
       mix atomvm.esp32.build --ref pr/1234
 
@@ -70,6 +80,7 @@ defmodule Mix.Tasks.Atomvm.Esp32.Build do
 
   """
   use Mix.Task
+  alias ExAtomVM.Esp32CustomPartitions
 
   @shortdoc "Build AtomVM for ESP32 from source"
 
@@ -93,7 +104,9 @@ defmodule Mix.Tasks.Atomvm.Esp32.Build do
           use_docker: :boolean,
           idf_version: :string,
           clean: :boolean,
-          mbedtls_prefix: :string
+          mbedtls_prefix: :string,
+          partition_table: :string,
+          sdkconfig: :string
         ]
       )
 
@@ -104,6 +117,17 @@ defmodule Mix.Tasks.Atomvm.Esp32.Build do
     use_docker = Keyword.get(opts, :use_docker, false)
     idf_version = Keyword.get(opts, :idf_version, @default_idf_version)
     clean = Keyword.get(opts, :clean, false)
+    sdkconfig = Keyword.get(opts, :sdkconfig)
+
+    partition_table =
+      case Esp32CustomPartitions.load_custom_partitions(Keyword.get(opts, :partition_table)) do
+        {:ok, selected} ->
+          selected
+
+        {:error, reason} ->
+          IO.puts("Error: #{reason}")
+          exit({:shutdown, 1})
+      end
 
     chips =
       opts
@@ -145,9 +169,29 @@ defmodule Mix.Tasks.Atomvm.Esp32.Build do
 
     """)
 
-    with :ok <- check_esp_idf(idf_path, use_docker, idf_version),
+    # Validate sdkconfig options for all target chips
+    validation_result =
+      Enum.reduce_while(chips, :ok, fn chip, :ok ->
+        case validate_sdkconfigs(sdkconfig, chip) do
+          :ok -> {:cont, :ok}
+          {:error, reason} -> {:halt, {:error, reason}}
+        end
+      end)
+
+    with :ok <- validation_result,
+         :ok <- check_esp_idf(idf_path, use_docker, idf_version),
          :ok <- check_escript(),
          :ok <- ExAtomVM.AtomVMBuilder.build_generic_unix(atomvm_path, mbedtls_prefix, clean) do
+      custom_partitions? = not is_nil(partition_table)
+
+      if custom_partitions? and not clean do
+        filename = Path.basename(partition_table.path)
+
+        IO.puts(
+          "#{filename} detected; forcing clean ESP32 platform build so partition metadata is regenerated..."
+        )
+      end
+
       results =
         chips
         |> Enum.with_index(1)
@@ -156,9 +200,38 @@ defmodule Mix.Tasks.Atomvm.Esp32.Build do
             IO.puts("\n━━━ Building chip #{index}/#{length(chips)}: #{chip} ━━━\n")
           end
 
-          force_clean = index > 1 or clean
+          sdkconfig_paths = custom_sdkconfig_paths(sdkconfig, chip)
+          custom_sdkconfig? = match?({:ok, _}, sdkconfig_paths)
 
-          case build_atomvm(atomvm_path, chip, idf_path, idf_version, use_docker, force_clean) do
+          if custom_sdkconfig? and not clean do
+            case sdkconfig_paths do
+              {:ok, {base, chip_spec}} ->
+                files =
+                  Enum.filter([base, chip_spec], & &1)
+                  |> Enum.map(&Path.basename/1)
+                  |> Enum.join(" and ")
+
+                IO.puts(
+                  "Custom sdkconfig (#{files}) detected; forcing clean ESP32 platform build so configurations are regenerated..."
+                )
+
+              _ ->
+                :ok
+            end
+          end
+
+          force_clean = clean or index > 1 or custom_partitions? or custom_sdkconfig?
+
+          case build_atomvm(
+                 atomvm_path,
+                 chip,
+                 idf_path,
+                 idf_version,
+                 use_docker,
+                 force_clean,
+                 partition_table,
+                 sdkconfig
+               ) do
             {:ok, src_img} ->
               img = save_image(src_img)
               {chip, :ok, img}
@@ -283,7 +356,16 @@ defmodule Mix.Tasks.Atomvm.Esp32.Build do
     end
   end
 
-  defp build_atomvm(atomvm_path, chip, idf_path, idf_version, use_docker, clean) do
+  defp build_atomvm(
+         atomvm_path,
+         chip,
+         idf_path,
+         idf_version,
+         use_docker,
+         clean,
+         partition_table,
+         sdkconfig
+       ) do
     build_dir = Path.join([atomvm_path, "src", "platforms", "esp32", "build"])
     platform_dir = Path.join([atomvm_path, "src", "platforms", "esp32"])
 
@@ -317,55 +399,59 @@ defmodule Mix.Tasks.Atomvm.Esp32.Build do
       File.cp!(dependencies_lock, dest_path)
     end
 
-    if clean and File.dir?(build_dir) do
-      IO.puts("Cleaning build directory...")
-      ExAtomVM.AtomVMBuilder.clean_dir(build_dir)
-    end
+    Esp32CustomPartitions.with_custom_partitions(platform_dir, partition_table, fn ->
+      with_staged_sdkconfig(platform_dir, chip, sdkconfig, fn ->
+        if clean and File.dir?(build_dir) do
+          IO.puts("Cleaning build directory...")
+          ExAtomVM.AtomVMBuilder.clean_dir(build_dir)
+        end
 
-    IO.puts("Configuring build for #{chip}...")
+        IO.puts("Configuring build for #{chip}...")
 
-    {_output, status} =
-      run_idf_command(
-        use_docker,
-        idf_version,
-        atomvm_path,
-        platform_dir,
-        idf_path,
-        idf_set_target_args(chip)
-      )
-
-    case status do
-      0 ->
-        IO.puts("Building AtomVM... (this may take several minutes)")
-
-        {_output, build_status} =
+        {_output, status} =
           run_idf_command(
             use_docker,
             idf_version,
             atomvm_path,
             platform_dir,
             idf_path,
-            idf_build_args()
+            idf_set_target_args(chip)
           )
 
-        case build_status do
+        case status do
           0 ->
-            copy_dependencies_lock(platform_dir)
+            IO.puts("Building AtomVM... (this may take several minutes)")
 
-            create_flashable_image(
-              Path.expand(atomvm_path),
-              Path.expand(build_dir),
-              chip,
-              use_docker
-            )
+            {_output, build_status} =
+              run_idf_command(
+                use_docker,
+                idf_version,
+                atomvm_path,
+                platform_dir,
+                idf_path,
+                idf_build_args()
+              )
+
+            case build_status do
+              0 ->
+                copy_dependencies_lock(platform_dir)
+
+                create_flashable_image(
+                  Path.expand(atomvm_path),
+                  Path.expand(build_dir),
+                  chip,
+                  use_docker
+                )
+
+              _status ->
+                {:error, "Build failed"}
+            end
 
           _status ->
-            {:error, "Build failed"}
+            {:error, "Failed to set target chip"}
         end
-
-      _status ->
-        {:error, "Failed to set target chip"}
-    end
+      end)
+    end)
   end
 
   defp idf_set_target_args(chip) do
@@ -527,5 +613,171 @@ defmodule Mix.Tasks.Atomvm.Esp32.Build do
       stderr_to_stdout: true,
       into: IO.stream(:stdio, :line)
     )
+  end
+
+  # Returns {:ok, {base_path, chip_path}} or {:ok, {base_path, nil}} or {:ok, {nil, chip_path}} or :error
+  @doc false
+  def custom_sdkconfig_paths(nil, chip) do
+    default_base = Path.join(File.cwd!(), "sdkconfig.defaults")
+    default_chip = Path.join(File.cwd!(), "sdkconfig.defaults.#{chip}")
+
+    base_exists = File.exists?(default_base)
+    chip_exists = File.exists?(default_chip)
+
+    cond do
+      base_exists and chip_exists -> {:ok, {default_base, default_chip}}
+      base_exists -> {:ok, {default_base, nil}}
+      chip_exists -> {:ok, {nil, default_chip}}
+      true -> :error
+    end
+  end
+
+  @doc false
+  def custom_sdkconfig_paths(user_provided_path, chip) do
+    base_path = Path.expand(user_provided_path)
+    chip_path = "#{base_path}.#{chip}"
+
+    base_exists = File.exists?(base_path)
+    chip_exists = File.exists?(chip_path)
+
+    cond do
+      base_exists and chip_exists -> {:ok, {base_path, chip_path}}
+      base_exists -> {:ok, {base_path, nil}}
+      chip_exists -> {:ok, {nil, chip_path}}
+      true -> :error
+    end
+  end
+
+  # Validates the project's custom sdkconfig defaults up front, so an invalid file fails fast.
+  @doc false
+  def validate_sdkconfigs(nil, chip) do
+    case custom_sdkconfig_paths(nil, chip) do
+      :error ->
+        :ok
+
+      {:ok, {base_path, chip_path}} ->
+        [base_path, chip_path]
+        |> Enum.filter(& &1)
+        |> validate_sdkconfig_files()
+    end
+  end
+
+  @doc false
+  def validate_sdkconfigs(user_provided_path, chip) do
+    case custom_sdkconfig_paths(user_provided_path, chip) do
+      :error ->
+        {:error,
+         "SDK config file does not exist: #{user_provided_path} (or target-specific override #{user_provided_path}.#{chip})"}
+
+      {:ok, {base_path, chip_path}} ->
+        [base_path, chip_path]
+        |> Enum.filter(& &1)
+        |> validate_sdkconfig_files()
+    end
+  end
+
+  defp validate_sdkconfig_files(files) do
+    Enum.reduce_while(files, :ok, fn path, :ok ->
+      case File.stat(path) do
+        {:ok, %File.Stat{type: :regular, size: 0}} ->
+          {:halt, {:error, "#{Path.basename(path)} is empty"}}
+
+        {:ok, %File.Stat{type: :regular}} ->
+          {:cont, :ok}
+
+        {:ok, _stat} ->
+          {:halt, {:error, "#{Path.basename(path)} exists but is not a regular file"}}
+
+        {:error, reason} ->
+          {:halt, {:error, "cannot read #{Path.basename(path)}: #{inspect(reason)}"}}
+      end
+    end)
+  end
+
+  defp with_staged_sdkconfig(platform_dir, chip, sdkconfig, fun) do
+    case custom_sdkconfig_paths(sdkconfig, chip) do
+      :error ->
+        fun.()
+
+      {:ok, paths} ->
+        stage_sdkconfigs(paths, platform_dir, chip, fun)
+    end
+  end
+
+  defp stage_sdkconfigs({base_path, chip_path}, platform_dir, chip, fun) do
+    target_path = Path.join(platform_dir, "sdkconfig.defaults.#{chip}")
+
+    case snapshot_file(target_path) do
+      {:ok, snapshot} ->
+        original_content =
+          case snapshot do
+            {:content, content} -> content
+            :missing -> ""
+          end
+
+        base_content =
+          if base_path && File.exists?(base_path), do: File.read!(base_path), else: ""
+
+        chip_content =
+          if chip_path && File.exists?(chip_path), do: File.read!(chip_path), else: ""
+
+        appended_data =
+          "\n# User Custom Defaults\n" <> base_content <> "\n" <> chip_content <> "\n"
+
+        try do
+          IO.puts("Staging custom sdkconfig settings into #{Path.basename(target_path)}...")
+          File.write!(target_path, original_content <> appended_data)
+          fun.()
+        after
+          restore_file(target_path, snapshot)
+        end
+
+      {:error, reason} ->
+        {:error, "Failed to read #{Path.basename(target_path)}: #{:file.format_error(reason)}"}
+    end
+  end
+
+  # Returns {:ok, {:content, binary}} when the file exists, {:ok, :missing} when
+  # it does not, or {:error, reason} if it exists but cannot be read.
+  # Snapshot/restore helpers so staged sdkconfig defaults leave the AtomVM
+  # checkout clean after the build.
+  @doc false
+  def snapshot_file(path) do
+    case File.read(path) do
+      {:ok, content} -> {:ok, {:content, content}}
+      {:error, :enoent} -> {:ok, :missing}
+      {:error, reason} -> {:error, reason}
+    end
+  end
+
+  @doc false
+  def restore_file(path, {:content, content}) do
+    case File.write(path, content) do
+      :ok ->
+        :ok
+
+      {:error, reason} ->
+        IO.puts(
+          "Warning: failed to restore #{path}: #{:file.format_error(reason)} " <>
+            "(AtomVM checkout may be left modified)"
+        )
+    end
+  end
+
+  @doc false
+  def restore_file(path, :missing) do
+    case File.rm(path) do
+      :ok ->
+        :ok
+
+      {:error, :enoent} ->
+        :ok
+
+      {:error, reason} ->
+        IO.puts(
+          "Warning: failed to remove temporary #{path}: #{:file.format_error(reason)} " <>
+            "(AtomVM checkout may be left modified)"
+        )
+    end
   end
 end
