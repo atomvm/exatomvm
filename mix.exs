@@ -5,7 +5,7 @@ defmodule ExAtomVM.MixProject do
     [
       app: :exatomvm,
       version: "0.1.0",
-      elixir: "~> 1.16",
+      elixir: "~> 1.17",
       start_permanent: Mix.env() == :prod,
       deps: deps(),
 
@@ -35,7 +35,8 @@ defmodule ExAtomVM.MixProject do
       {:uf2tool, "1.1.0", runtime: false},
       {:ex_doc, "~> 0.20", only: :dev, runtime: false},
       {:pythonx, "~> 0.4.0", runtime: false, optional: true},
-      {:req, "~> 0.5.0", runtime: false, optional: true}
+      {:req, "~> 0.7.0", runtime: false, optional: true},
+      {:igniter, "~> 0.8", runtime: false, optional: true}
     ]
   end
 end
