@@ -66,6 +66,7 @@ defmodule Mix.Tasks.Atomvm.Esp32.Flash do
 
   alias ExAtomVM.Esp32PartitionTable
   alias ExAtomVM.EsptoolHelper
+  alias ExAtomVM.TaskHelp
   alias Mix.Project
   alias Mix.Tasks.Atomvm.Packbeam
 
@@ -96,7 +97,7 @@ defmodule Mix.Tasks.Atomvm.Esp32.Flash do
       flash(idf_path, chip, port, baud, flash_target(options, avm_config))
     else
       {:atomvm, :error} ->
-        IO.puts("error: missing AtomVM project config.")
+        IO.puts(TaskHelp.missing_config())
         exit({:shutdown, 1})
 
       {:args, :error} ->

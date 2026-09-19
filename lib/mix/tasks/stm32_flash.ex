@@ -45,6 +45,7 @@ defmodule Mix.Tasks.Atomvm.Stm32.Flash do
   For example, you can use the `--stflash_path` option to specify or override the `stflash_path` property.
   """
 
+  alias ExAtomVM.TaskHelp
   alias Mix.Project
   alias Mix.Tasks.Atomvm.Packbeam
 
@@ -65,7 +66,7 @@ defmodule Mix.Tasks.Atomvm.Stm32.Flash do
       flash(stflash_path, flash_offset)
     else
       {:atomvm, :error} ->
-        IO.puts("error: missing AtomVM project config.")
+        IO.puts(TaskHelp.missing_config())
         exit({:shutdown, 1})
 
       {:args, :error} ->

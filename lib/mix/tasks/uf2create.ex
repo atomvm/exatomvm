@@ -40,6 +40,7 @@ defmodule Mix.Tasks.Atomvm.Uf2create do
   For example, you can use the `--app_start` option to specify or override the `app_start` property.
   """
 
+  alias ExAtomVM.TaskHelp
   alias Mix.Project
   alias Mix.Tasks.Atomvm.Packbeam
   # require :uf2tool
@@ -72,7 +73,7 @@ defmodule Mix.Tasks.Atomvm.Uf2create do
       IO.puts("Created #{config[:app]}.uf2")
     else
       {:atomvm, :error} ->
-        IO.puts("error: missing AtomVM project config.")
+        IO.puts(TaskHelp.missing_config())
         exit({:shutdown, 1})
 
       {:args, :error} ->

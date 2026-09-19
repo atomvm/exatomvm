@@ -48,6 +48,7 @@ defmodule Mix.Tasks.Atomvm.Pico.Flash do
   For example, you can use the `--picotool` option to specify or override the `picotool` property.
   """
 
+  alias ExAtomVM.TaskHelp
   alias Mix.Project
   alias Mix.Tasks.Atomvm.Uf2create
 
@@ -93,7 +94,7 @@ defmodule Mix.Tasks.Atomvm.Pico.Flash do
       do_flash(pico_path, pico_reset, picotool)
     else
       {:atomvm, :error} ->
-        IO.puts("error: missing AtomVM project config.")
+        IO.puts(TaskHelp.missing_config())
         exit({:shutdown, 1})
 
       {:args, :error} ->
