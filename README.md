@@ -370,6 +370,70 @@ Example:
     Compiling 1 file (.ex)
     Generated my_project app
 
+### The `atomvm.esp32.build` task
+
+The `atomvm.esp32.build` task builds an AtomVM ESP32 firmware image from source, with Elixir support enabled, using either a local ESP-IDF installation or the ESP-IDF Docker image. The resulting flashable image is written under `_build/atomvm_images/` and can be flashed with `mix atomvm.esp32.install`.
+
+If no AtomVM source is supplied, the task clones the AtomVM `main` branch automatically. Use `--atomvm-path` to build from a local checkout or `--atomvm-url`/`--ref` to build from a specific git source.
+
+#### Requirements
+
+* Erlang/OTP 27 or later, Elixir 1.18 or later, and Git
+* **Without Docker:** CMake (3.13+), Ninja (preferred) or Make, and ESP-IDF (v5.5.4 or later recommended)
+* **With Docker (`--use-docker`):** Docker. Note that Docker build support requires AtomVM `main` from Jan 2, 2026 or later; earlier AtomVM versions must be built with a local ESP-IDF toolchain.
+
+#### Options
+
+| Option | Default | Description |
+|--------|---------|-------------|
+| `--atomvm-path` | - | Path to a local AtomVM repository (overrides `--atomvm-url` if both are given) |
+| `--atomvm-url` | `https://github.com/atomvm/AtomVM` | Git URL to clone AtomVM from |
+| `--ref` | `main` | Git reference to check out: branch, tag, commit SHA, or PR (e.g. `pr/1234` or `pull/1234/head`) |
+| `--chip` | `esp32` | Target chip(s), comma-separated for multiple (`esp32`, `esp32s2`, `esp32s3`, `esp32c2`, `esp32c3`, `esp32c6`, `esp32h2`, `esp32p4`) |
+| `--idf-path` | `idf.py` | Path to the `idf.py` executable |
+| `--use-docker` | `false` | Use the ESP-IDF Docker image instead of a local installation |
+| `--idf-version` | `v5.5.4` | ESP-IDF version for the Docker image |
+| `--clean` | `false` | Clean the build directory before building |
+| `--mbedtls-prefix` | - | Path to a custom MbedTLS installation (falls back to the `MBEDTLS_PREFIX` env var) |
+| `--partition-table` | - | Path to custom partition table CSV file (falls back to `custom_partitions.csv` in project root) |
+
+#### Custom partition table
+
+You can explicitly specify a custom partition table file with the `--partition-table` option:
+
+```shell
+mix atomvm.esp32.build --partition-table path/to/partitions.csv
+```
+
+If the `--partition-table` option is not provided but the root of your Mix project contains `custom_partitions.csv`, it is used as the default partition table for the build.
+
+ExAtomVM passes custom partition contents through unchanged, without imposing partition names, types, offsets, or sizes. It only checks that the selected file is readable, non-empty, and regular; AtomVM and ESP-IDF handle the contents during the build.
+
+The selected file is read once before cloning or building and reused for every chip, even if cleaning removes the source file. Its contents are copied into the AtomVM ESP32 platform tree only while the build runs — so Docker builds see it through the mounted AtomVM source tree — and the original partition table is restored afterwards, leaving the AtomVM checkout clean.
+
+> Note. When a custom partition table is used (either via `--partition-table` or default `custom_partitions.csv`), the task automatically forces a clean ESP32 platform build so CMake regenerates the partition layout — you do not need to pass `--clean` yourself.
+
+#### Examples
+
+    # Build for the default esp32 chip (clones AtomVM main automatically)
+    shell$ mix atomvm.esp32.build
+
+    # Build from a local AtomVM checkout for a specific chip, cleaning first
+    shell$ mix atomvm.esp32.build --atomvm-path /path/to/AtomVM --chip esp32s3 --clean
+
+    # Build for multiple chips in one run
+    shell$ mix atomvm.esp32.build --chip esp32,esp32s3,esp32c6
+
+    # Build from a pull request
+    shell$ mix atomvm.esp32.build --ref pr/1234
+
+    # Build using Docker (clones AtomVM main automatically)
+    shell$ mix atomvm.esp32.build --use-docker --chip esp32s3 --clean
+
+When combining `--use-docker` with a local `--atomvm-path`, the task expands the checkout path to an absolute path and bind-mounts it into the container. For example, if AtomVM is checked out next to your project:
+
+    shell$ mix atomvm.esp32.build --use-docker --atomvm-path ../AtomVM --chip esp32s3
+
 ### The `atomvm.esp32.flash` task
 
 The `atomvm.esp32.flash` task is used to flash your application to a micro-controller and executed by the AtomVM virtual machine.
