@@ -67,6 +67,16 @@ defmodule ExAtomVM.TaskHelp do
     """
   end
 
+  def missing_dependency do
+    """
+    warning: missing atomvm dependency.
+
+    💡 Add it to the dependencies in mix.exs:
+
+         {:atomvm, "~> 0.7.0-alpha.1", runtime: false}
+    """
+  end
+
   defp start_module(app), do: Macro.camelize(Atom.to_string(app))
 
   defp tasks(prefix) do

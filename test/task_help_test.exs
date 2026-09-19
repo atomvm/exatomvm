@@ -23,7 +23,12 @@ defmodule ExAtomVM.TaskHelpTest do
 
   test "every page and every advice is a printable text that fits a terminal" do
     pages = Enum.map(@pages, &Mix.Task.moduledoc/1)
-    advice = [TaskHelp.missing_config(:my_project), TaskHelp.missing_start(:my_project)]
+
+    advice = [
+      TaskHelp.missing_config(:my_project),
+      TaskHelp.missing_start(:my_project),
+      TaskHelp.missing_dependency()
+    ]
 
     for text <- pages ++ advice do
       assert is_binary(text) and text != ""
@@ -32,6 +37,24 @@ defmodule ExAtomVM.TaskHelpTest do
       for line <- String.split(text, "\n") do
         assert String.length(line) <= 80, "a line of #{String.length(line)}: #{line}"
       end
+    end
+  end
+
+  test "the dependency advice shows a line that can be pasted into deps" do
+    advice = TaskHelp.missing_dependency()
+
+    assert advice =~ ":atomvm"
+    assert advice =~ "runtime: false"
+
+    assert [line] = for(l <- String.split(advice, "\n"), String.contains?(l, ":atomvm"), do: l)
+    assert {:ok, [{:atomvm, requirement, opts}]} = parse_deps(line)
+    assert Version.parse_requirement(requirement) != :error
+    assert opts == [runtime: false]
+  end
+
+  defp parse_deps(line) do
+    with {:ok, quoted} <- Code.string_to_quoted("[" <> String.trim(line) <> "]") do
+      {:ok, Code.eval_quoted(quoted) |> elem(0)}
     end
   end
 
