@@ -7,13 +7,13 @@ defmodule Mix.Tasks.Atomvm.Esp32.Build do
   ## Requirements
 
   **General requirements**
-    * Erlang/OTP (25 or later)
-    * Elixir (1.16 or later)
+    * Erlang/OTP (27 or later)
+    * Elixir (1.18 or later)
     * Git
-
-  **Without Docker:**
     * CMake (3.13 or later)
     * Ninja (preferred) or Make
+
+  **Without Docker:**
     * ESP-IDF (v5.5.4 or later recommended)
 
   **With Docker (--use-docker flag):**
@@ -32,6 +32,12 @@ defmodule Mix.Tasks.Atomvm.Esp32.Build do
     * `--idf-version` - ESP-IDF version for Docker image (default: v5.5.4)
     * `--clean` - Clean build directory before building
     * `--mbedtls-prefix` - Path to custom MbedTLS installation (optional, falls back to MBEDTLS_PREFIX env var)
+    * `--partition-table` - Path to custom partition table CSV file (optional, defaults to custom_partitions.csv if present)
+
+  If `--partition-table` is provided, or if your Mix project root contains `custom_partitions.csv`,
+  it will be used as the ESP32 partition table for the build. ExAtomVM passes the contents
+  through unchanged, without imposing partition names, types, offsets, or sizes. The selected
+  file must be readable, non-empty, and regular; AtomVM and ESP-IDF handle its contents.
 
   ## Examples
 
@@ -70,6 +76,7 @@ defmodule Mix.Tasks.Atomvm.Esp32.Build do
 
   """
   use Mix.Task
+  alias ExAtomVM.Esp32CustomPartitions
 
   @shortdoc "Build AtomVM for ESP32 from source"
 
@@ -93,7 +100,8 @@ defmodule Mix.Tasks.Atomvm.Esp32.Build do
           use_docker: :boolean,
           idf_version: :string,
           clean: :boolean,
-          mbedtls_prefix: :string
+          mbedtls_prefix: :string,
+          partition_table: :string
         ]
       )
 
@@ -104,6 +112,16 @@ defmodule Mix.Tasks.Atomvm.Esp32.Build do
     use_docker = Keyword.get(opts, :use_docker, false)
     idf_version = Keyword.get(opts, :idf_version, @default_idf_version)
     clean = Keyword.get(opts, :clean, false)
+
+    partition_table =
+      case Esp32CustomPartitions.load_custom_partitions(Keyword.get(opts, :partition_table)) do
+        {:ok, selected} ->
+          selected
+
+        {:error, reason} ->
+          IO.puts("Error: #{reason}")
+          exit({:shutdown, 1})
+      end
 
     chips =
       opts
@@ -148,6 +166,16 @@ defmodule Mix.Tasks.Atomvm.Esp32.Build do
     with :ok <- check_esp_idf(idf_path, use_docker, idf_version),
          :ok <- check_escript(),
          :ok <- ExAtomVM.AtomVMBuilder.build_generic_unix(atomvm_path, mbedtls_prefix, clean) do
+      custom_partitions? = not is_nil(partition_table)
+
+      if custom_partitions? and not clean do
+        filename = Path.basename(partition_table.path)
+
+        IO.puts(
+          "#{filename} detected; forcing clean ESP32 platform build so partition metadata is regenerated..."
+        )
+      end
+
       results =
         chips
         |> Enum.with_index(1)
@@ -156,9 +184,17 @@ defmodule Mix.Tasks.Atomvm.Esp32.Build do
             IO.puts("\n━━━ Building chip #{index}/#{length(chips)}: #{chip} ━━━\n")
           end
 
-          force_clean = index > 1 or clean
+          force_clean = clean or index > 1 or custom_partitions?
 
-          case build_atomvm(atomvm_path, chip, idf_path, idf_version, use_docker, force_clean) do
+          case build_atomvm(
+                 atomvm_path,
+                 chip,
+                 idf_path,
+                 idf_version,
+                 use_docker,
+                 force_clean,
+                 partition_table
+               ) do
             {:ok, src_img} ->
               img = save_image(src_img)
               {chip, :ok, img}
@@ -283,7 +319,7 @@ defmodule Mix.Tasks.Atomvm.Esp32.Build do
     end
   end
 
-  defp build_atomvm(atomvm_path, chip, idf_path, idf_version, use_docker, clean) do
+  defp build_atomvm(atomvm_path, chip, idf_path, idf_version, use_docker, clean, partition_table) do
     build_dir = Path.join([atomvm_path, "src", "platforms", "esp32", "build"])
     platform_dir = Path.join([atomvm_path, "src", "platforms", "esp32"])
 
@@ -317,55 +353,57 @@ defmodule Mix.Tasks.Atomvm.Esp32.Build do
       File.cp!(dependencies_lock, dest_path)
     end
 
-    if clean and File.dir?(build_dir) do
-      IO.puts("Cleaning build directory...")
-      ExAtomVM.AtomVMBuilder.clean_dir(build_dir)
-    end
+    Esp32CustomPartitions.with_custom_partitions(platform_dir, partition_table, fn ->
+      if clean and File.dir?(build_dir) do
+        IO.puts("Cleaning build directory...")
+        ExAtomVM.AtomVMBuilder.clean_dir(build_dir)
+      end
 
-    IO.puts("Configuring build for #{chip}...")
+      IO.puts("Configuring build for #{chip}...")
 
-    {_output, status} =
-      run_idf_command(
-        use_docker,
-        idf_version,
-        atomvm_path,
-        platform_dir,
-        idf_path,
-        idf_set_target_args(chip)
-      )
+      {_output, status} =
+        run_idf_command(
+          use_docker,
+          idf_version,
+          atomvm_path,
+          platform_dir,
+          idf_path,
+          idf_set_target_args(chip)
+        )
 
-    case status do
-      0 ->
-        IO.puts("Building AtomVM... (this may take several minutes)")
+      case status do
+        0 ->
+          IO.puts("Building AtomVM... (this may take several minutes)")
 
-        {_output, build_status} =
-          run_idf_command(
-            use_docker,
-            idf_version,
-            atomvm_path,
-            platform_dir,
-            idf_path,
-            idf_build_args()
-          )
-
-        case build_status do
-          0 ->
-            copy_dependencies_lock(platform_dir)
-
-            create_flashable_image(
-              Path.expand(atomvm_path),
-              Path.expand(build_dir),
-              chip,
-              use_docker
+          {_output, build_status} =
+            run_idf_command(
+              use_docker,
+              idf_version,
+              atomvm_path,
+              platform_dir,
+              idf_path,
+              idf_build_args()
             )
 
-          _status ->
-            {:error, "Build failed"}
-        end
+          case build_status do
+            0 ->
+              copy_dependencies_lock(platform_dir)
 
-      _status ->
-        {:error, "Failed to set target chip"}
-    end
+              create_flashable_image(
+                Path.expand(atomvm_path),
+                Path.expand(build_dir),
+                chip,
+                use_docker
+              )
+
+            _status ->
+              {:error, "Build failed"}
+          end
+
+        _status ->
+          {:error, "Failed to set target chip"}
+      end
+    end)
   end
 
   defp idf_set_target_args(chip) do
