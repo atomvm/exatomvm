@@ -54,7 +54,7 @@ defmodule Mix.Tasks.Atomvm.Esp32.Install do
       mix atomvm.esp32.install --image AtomVM-esp32s3-atomgl-ipv6-libsodium-psram-nightly-0.7
 
       # Install a specific release, including prereleases (erases flash)
-      mix atomvm.esp32.install --version v0.7.0-alpha.1
+      mix atomvm.esp32.install --version v0.7.0-beta.0
 
       # Install a custom build published by another repository (erases flash)
       mix atomvm.esp32.install --repo acme/atomvm-builds --image esp32s3-kiosk.img

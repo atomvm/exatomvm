@@ -73,7 +73,7 @@ defmodule ExAtomVM.TaskHelp do
 
     💡 Add it to the dependencies in mix.exs:
 
-         {:atomvm, "~> 0.7.0-alpha.1", runtime: false}
+         {:atomvm, "~> 0.7.0-beta.0", runtime: false}
     """
   end
 

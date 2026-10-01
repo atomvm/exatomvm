@@ -496,7 +496,7 @@ from source.
 An image is installed by release tag, by the name shown in the listing, or by
 path, for a `.img` file or a firmware factory `.zip` bundle:
 
-    shell$ mix atomvm.esp32.install --version v0.7.0-alpha.1
+    shell$ mix atomvm.esp32.install --version v0.7.0-beta.0
     shell$ mix atomvm.esp32.install --image AtomVM-esp32s3-atomgl-ipv6-libsodium-psram-nightly-0.7
     shell$ mix atomvm.esp32.install --image _build/atomvm_images/atomvm-esp32s3-elixir.img
 
