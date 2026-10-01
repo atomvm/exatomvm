@@ -3,16 +3,29 @@ defmodule Mix.Tasks.Atomvm.Check do
   @shortdoc "Check application code for use of unsupported instructions"
 
   @moduledoc """
-  Verifies that the functions and modules used are either part of the application source (or deps) or supported by AtomVM.
-  Modules under `Mix.Tasks` are not checked, since `Mix.Tasks.Atomvm.Packbeam` does not pack them.
+  Verifies that the functions and the BEAM instructions the application uses
+  are provided by the AtomVM release it targets, or by the application itself
+  and its dependencies. Modules under `Mix.Tasks` are not checked, since
+  `Mix.Tasks.Atomvm.Packbeam` does not pack them.
 
-  The check will catch the use of any standard Elixir modules or functions used in the application that are not included in exavmlib.
+  The release is the one of the `atomvm` dependency of `mix.exs`, whose
+  version is the AtomVM version:
+
+      {:atomvm, "~> 0.7.0-beta.0", runtime: false}
+
+  Without it the checks are skipped, a warning says what to add, and the
+  application is packed anyway. `ATOMVM_SUPPORTED_API` names a directory with
+  the same files instead, `funcs.txt` and `instructions.txt`, and wins over
+  the dependency; a build of AtomVM from source writes one with:
+
+      cmake --build build -t supported_api
 
   > #### Info {: .info}
   >
   > Note. The `Mix.Tasks.Atomvm.Packbeam` task depends on this one, so users will likely never need to use it directly.
   """
 
+  alias ExAtomVM.SupportedApi
   alias ExAtomVM.TaskHelp
   alias Mix.Project
 
@@ -26,14 +39,24 @@ defmodule Mix.Tasks.Atomvm.Check do
 
     beams_path = Project.compile_path()
 
-    :ok = check_dependency()
-    :ok = check_instructions(beams_path)
-    :ok = check_ext_calls(beams_path)
+    case SupportedApi.resolve() do
+      {:ok, api} ->
+        :ok = announce(api)
+        :ok = check_instructions(beams_path, api)
+        :ok = check_ext_calls(beams_path, api)
+
+      :error ->
+        IO.puts(TaskHelp.missing_dependency())
+    end
 
     {:ok, []}
   end
 
-  defp check_dependency do
+  defp announce(%{source: :environment} = api) do
+    IO.puts("Checking against #{SupportedApi.describe_source(api)}: #{api.dir}")
+  end
+
+  defp announce(%{source: :dependency}) do
     if not declared?(Project.config()[:deps]) do
       IO.puts(TaskHelp.missing_dependency())
     end
@@ -178,65 +201,60 @@ defmodule Mix.Tasks.Atomvm.Check do
     |> Enum.into(MapSet.new())
   end
 
-  defp check_ext_calls(beams_path) do
+  defp check_ext_calls(beams_path, api) do
     calls_set = extract_calls(beams_path)
     runtime_deps_beams = Mix.Tasks.Atomvm.Packbeam.runtime_deps_beams()
 
     exported_calls_set =
       MapSet.union(extract_exported(beams_path), extract_exported(runtime_deps_beams))
 
-    avail_funcs =
-      Path.join(:code.priv_dir(:exatomvm), "funcs.txt")
-      |> File.stream!()
-      |> Stream.map(&String.replace(&1, "\n", ""))
-      |> Enum.into(MapSet.new())
-      |> MapSet.union(exported_calls_set)
+    avail_funcs = MapSet.union(read_set(api.funcs), exported_calls_set)
 
     missing = MapSet.difference(calls_set, avail_funcs)
 
     if MapSet.size(missing) != 0 do
-      IO.puts("Warning: following modules or functions are not available on AtomVM:")
-      print_list(missing)
-      IO.puts("")
-      IO.puts("(Using them may not be supported; make sure ExAtomVM is fully updated.)")
-      IO.puts("")
-
-      :ok
-    else
-      :ok
+      IO.puts(functions_warning(missing, api))
     end
+
+    :ok
   end
 
-  defp check_instructions(beams_path) do
+  defp check_instructions(beams_path, api) do
     instructions_set = extract_instructions(beams_path)
 
-    avail_instructions =
-      Path.join(:code.priv_dir(:exatomvm), "instructions.txt")
-      |> File.stream!()
-      |> Stream.map(&String.replace(&1, "\n", ""))
-      |> Enum.into(MapSet.new())
-
-    missing_instructions = MapSet.difference(instructions_set, avail_instructions)
+    missing_instructions = MapSet.difference(instructions_set, read_set(api.instructions))
 
     if MapSet.size(missing_instructions) != 0 do
-      IO.puts("Warning: following missing instructions are used:")
-      print_list(missing_instructions)
-      IO.puts("")
-      IO.puts("(Using them may not be supported; make sure ExAtomVM is fully updated.)")
-      IO.puts("")
-
-      :ok
-    else
-      :ok
+      IO.puts(instructions_warning(missing_instructions, api))
     end
+
+    :ok
   end
 
-  defp print_list(enum) do
-    enum
-    |> Enum.to_list()
-    |> Enum.map(fn s -> "* #{s}" end)
-    |> Enum.join("\n")
-    |> IO.puts()
+  defp read_set(path) do
+    path
+    |> File.stream!()
+    |> Stream.map(&String.replace(&1, "\n", ""))
+    |> Enum.into(MapSet.new())
+  end
+
+  @doc false
+  def functions_warning(missing, api) do
+    warning("functions not available on #{SupportedApi.describe(api)}", missing, api)
+  end
+
+  @doc false
+  def instructions_warning(missing, api) do
+    warning("instructions not implemented by #{SupportedApi.describe(api)}", missing, api)
+  end
+
+  defp warning(what, missing, api) do
+    """
+    Warning: #{what}:
+    #{missing |> Enum.sort() |> Enum.map_join("\n", &"* #{&1}")}
+
+    (Checked against #{SupportedApi.describe_source(api)}.)
+    """
   end
 
   defp scan_instructions(code, fun) do
