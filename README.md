@@ -48,7 +48,7 @@ Start by creating a Mix project
 
     Run "mix help" for more commands.
 
-Edit the generated `mix.exs` to include the ExAtomVM dependency (`{:exatomvm, git: "https://github.com/atomvm/ExAtomVM/"}`), and add a properties list using the `atomvm` key containing a `start` entry (the flash tasks document their optional entries below):
+Edit the generated `mix.exs` to include the ExAtomVM dependency and the `atomvm` package of the AtomVM release the project targets, and add a properties list using the `atomvm` key containing a `start` entry (the flash tasks document their optional entries below):
 
     ## elixir
     defmodule MyProject.MixProject do
@@ -77,7 +77,8 @@ Edit the generated `mix.exs` to include the ExAtomVM dependency (`{:exatomvm, gi
         # Run "mix help deps" to learn about dependencies.
         defp deps do
         [
-            {:exatomvm, git: "https://github.com/atomvm/ExAtomVM/"}
+            {:exatomvm, git: "https://github.com/atomvm/exatomvm/", runtime: false},
+            {:atomvm, "~> 0.7.0-beta.0", runtime: false}
             # {:dep_from_hexpm, "~> 0.3.0"},
             # {:dep_from_git, git: "https://github.com/elixir-lang/my_dep.git", tag: "0.1.0"}
         ]
@@ -85,6 +86,11 @@ Edit the generated `mix.exs` to include the ExAtomVM dependency (`{:exatomvm, gi
     end
 
 > Note.  By convention, Mix dependencies are encapsulated in the private `deps` function in the project module (`mix.exs`).
+
+The `atomvm` package names the AtomVM release the project targets, its version
+being the AtomVM version. `mix atomvm.check`, which `mix atomvm.packbeam` and
+the flash tasks run first, compares the application with the functions and the
+BEAM instructions of that release, and warns when the package is missing.
 
 Edit the `my_project.ex` file so that it contains a `start` function:
 
@@ -275,13 +281,14 @@ To flash your project to an ESP32 device, use the `atomvm.esp32.flash` mix task.
 
 ### `mix.exs` Configuration
 
-To use this Mix plugin, add `ExAtomVM` to the dependencies list in your `mix.exs` project file.
+To use this Mix plugin, add `ExAtomVM` and the `atomvm` package of the AtomVM release you target to the dependencies list in your `mix.exs` project file.
 
     def project do [
         ...
         deps: [
           ...
-          {:exatomvm, git: "https://github.com/atomvm/ExAtomVM/"},
+          {:exatomvm, git: "https://github.com/atomvm/exatomvm/", runtime: false},
+          {:atomvm, "~> 0.7.0-beta.0", runtime: false},
           ...
         ],
         ...
@@ -347,6 +354,19 @@ one board, its tasks and the dependencies they need.
 
 A task that needs the `atomvm` section of `mix.exs` and does not find it prints
 what to add to it.
+
+### The `atomvm.check` task
+
+The `atomvm.check` task compares the application with the AtomVM release of
+the `atomvm` dependency: it lists the functions that release does not provide
+and the BEAM instructions it does not implement. `mix atomvm.packbeam` and the
+flash tasks run it before packing. Without the dependency the check is skipped
+and a warning says what to add to `mix.exs`.
+
+A build of AtomVM from source is checked against instead by naming the
+directory its `supported_api` target writes:
+
+    shell$ ATOMVM_SUPPORTED_API=../AtomVM/build/supported_api mix atomvm.check
 
 ### The `atomvm.packbeam` task
 
@@ -496,7 +516,7 @@ from source.
 An image is installed by release tag, by the name shown in the listing, or by
 path, for a `.img` file or a firmware factory `.zip` bundle:
 
-    shell$ mix atomvm.esp32.install --version v0.7.0-alpha.1
+    shell$ mix atomvm.esp32.install --version v0.7.0-beta.0
     shell$ mix atomvm.esp32.install --image AtomVM-esp32s3-atomgl-ipv6-libsodium-psram-nightly-0.7
     shell$ mix atomvm.esp32.install --image _build/atomvm_images/atomvm-esp32s3-elixir.img
 

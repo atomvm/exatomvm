@@ -27,7 +27,8 @@ defmodule ExAtomVM.TaskHelpTest do
     advice = [
       TaskHelp.missing_config(:my_project),
       TaskHelp.missing_start(:my_project),
-      TaskHelp.missing_dependency()
+      TaskHelp.missing_dependency(),
+      TaskHelp.unsupported_otp("AtomVM 0.7.0-beta.0", 30, [26, 27, 28, 29])
     ]
 
     for text <- pages ++ advice do
@@ -50,6 +51,16 @@ defmodule ExAtomVM.TaskHelpTest do
     assert {:ok, [{:atomvm, requirement, opts}]} = parse_deps(line)
     assert Version.parse_requirement(requirement) != :error
     assert opts == [runtime: false]
+  end
+
+  test "the OTP advice names the release, the OTP and every supported one" do
+    advice = TaskHelp.unsupported_otp("AtomVM 0.7.0-beta.0", 30, [26, 27, 28, 29])
+
+    assert advice =~ "0.7.0-beta.0"
+    assert advice =~ "30"
+    for otp <- 26..29, do: assert(advice =~ "#{otp}")
+
+    assert TaskHelp.unsupported_otp("AtomVM 0.7.0-beta.0", 30, [29]) =~ "29"
   end
 
   defp parse_deps(line) do
