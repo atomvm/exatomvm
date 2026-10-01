@@ -78,6 +78,23 @@ defmodule Mix.Tasks.Atomvm.CheckTest do
     for otp <- 26..29, do: assert(warning =~ "#{otp}")
   end
 
+  test "the Elixir line is added only for a version the release was not tested with" do
+    api = %{@api | manifest: %{"tested_elixir" => ["1.17", "1.18", "1.19"]}}
+    missing = MapSet.new(["x:y/0"])
+
+    assert Check.elixir_note(api, "1.18.3") == nil
+    assert Check.elixir_note(@api, "1.20.0-rc.6") == nil
+
+    note = Check.elixir_note(api, "1.20.0-rc.6")
+    assert note =~ "1.20"
+    for elixir <- ["1.17", "1.18", "1.19"], do: assert(note =~ elixir)
+    assert String.length(note) <= 80
+
+    assert Check.functions_warning(missing, api, "1.20.0") =~ note
+    refute Check.functions_warning(missing, api, "1.19.0") =~ "tested"
+    refute Check.instructions_warning(missing, api) =~ "tested"
+  end
+
   test "the warnings name the variable when it is the source" do
     api = %{@api | source: :environment, version: nil}
     warning = Check.functions_warning(MapSet.new(["x:y/0"]), api)

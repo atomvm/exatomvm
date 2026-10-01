@@ -258,8 +258,24 @@ defmodule Mix.Tasks.Atomvm.Check do
   end
 
   @doc false
-  def functions_warning(missing, api) do
-    warning("functions not available on #{SupportedApi.describe(api)}", missing, api)
+  def functions_warning(missing, api, elixir \\ System.version()) do
+    text = warning("functions not available on #{SupportedApi.describe(api)}", missing, api)
+
+    case elixir_note(api, elixir) do
+      nil -> text
+      note -> text <> note <> "\n"
+    end
+  end
+
+  @doc false
+  def elixir_note(api, elixir) do
+    tested = SupportedApi.tested_elixir(api)
+    %Version{major: major, minor: minor} = Version.parse!(elixir)
+    release = "#{major}.#{minor}"
+
+    if tested not in [nil, []] and release not in tested do
+      "(Elixir #{release} is not among the versions tested with it: #{Enum.join(tested, ", ")}.)"
+    end
   end
 
   @doc false
