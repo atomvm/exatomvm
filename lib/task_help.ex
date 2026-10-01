@@ -77,7 +77,22 @@ defmodule ExAtomVM.TaskHelp do
     """
   end
 
+  def unsupported_otp(release, otp, supported) do
+    """
+    warning: #{release} does not support modules compiled by OTP #{otp}.
+
+    💡 Build the project with OTP #{alternatives(supported)}.
+    """
+  end
+
   defp start_module(app), do: Macro.camelize(Atom.to_string(app))
+
+  defp alternatives([one]), do: "#{one}"
+
+  defp alternatives(list) do
+    {others, [last]} = Enum.split(list, -1)
+    Enum.join(others, ", ") <> " or #{last}"
+  end
 
   defp tasks(prefix) do
     found =

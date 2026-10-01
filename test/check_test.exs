@@ -65,6 +65,19 @@ defmodule Mix.Tasks.Atomvm.CheckTest do
     end
   end
 
+  test "the OTP warning fires only for an OTP the manifest leaves out" do
+    api = %{@api | manifest: %{"supported_erlang" => [26, 27, 28, 29]}}
+
+    assert Check.otp_warning(api, 29) == nil
+    assert Check.otp_warning(@api, 30) == nil
+    assert Check.otp_warning(%{@api | manifest: %{}}, 30) == nil
+
+    warning = Check.otp_warning(api, 30)
+    assert warning =~ "30"
+    assert warning =~ "0.7.0-beta.0"
+    for otp <- 26..29, do: assert(warning =~ "#{otp}")
+  end
+
   test "the warnings name the variable when it is the source" do
     api = %{@api | source: :environment, version: nil}
     warning = Check.functions_warning(MapSet.new(["x:y/0"]), api)

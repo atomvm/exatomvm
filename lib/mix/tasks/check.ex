@@ -42,6 +42,7 @@ defmodule Mix.Tasks.Atomvm.Check do
     case SupportedApi.resolve() do
       {:ok, api} ->
         :ok = announce(api)
+        :ok = check_otp(api)
         :ok = check_instructions(beams_path, api)
         :ok = check_ext_calls(beams_path, api)
 
@@ -63,6 +64,24 @@ defmodule Mix.Tasks.Atomvm.Check do
 
     :ok
   end
+
+  defp check_otp(api) do
+    case otp_warning(api) do
+      nil -> :ok
+      warning -> IO.puts(warning)
+    end
+  end
+
+  @doc false
+  def otp_warning(api, otp \\ otp_release()) do
+    supported = SupportedApi.supported_erlang(api)
+
+    if supported not in [nil, []] and otp not in supported do
+      TaskHelp.unsupported_otp(SupportedApi.describe(api), otp, supported)
+    end
+  end
+
+  defp otp_release, do: :erlang.system_info(:otp_release) |> List.to_integer()
 
   @doc false
   def declared?(deps) do
