@@ -28,13 +28,15 @@ defmodule Mix.Tasks.Atomvm.Packbeam do
   `atomvm.packbeam` task.
 
     * `:start` - The name of the module containing the start/0 entrypoint function. Only to be used to override the `:start` options defined in the the projects `mix.exs` This would not normally be needed, unless the user had an alternate mode of operation e.g like a client/server app that normally builds the client, but when building the server uses a different start module.
+    * `:include_lines` - When `true`, line number information (the `Line` chunk) is kept in the packed BEAM files, so that stack traces on AtomVM carry line numbers, at the cost of a bigger AVM file. Defaults to `false`.
 
   ## Command line options
 
   Properties in the mix.exs file may be over-ridden on the command line using long-style flags (prefixed by --) by the same name
   as the [supported properties](#module-configuration)
 
-  For example, you can use the `--start` option to specify or override the `start` property.
+  For example, you can use the `--start` option to specify or override the `start` property,
+  or the `--include_lines` flag to enable the `include_lines` property.
   """
 
   alias ExAtomVM.PackBEAM
@@ -49,10 +51,12 @@ defmodule Mix.Tasks.Atomvm.Packbeam do
          {:atomvm, {:ok, avm_config}} <- {:atomvm, Keyword.fetch(config, :atomvm)},
          {:start, {:ok, start_module}} <-
            {:start, Map.get(options, :start, Keyword.fetch(avm_config, :start))},
-         :ok <- pack_avm_deps(),
-         :ok <- pack_priv(),
+         pack_opts = pack_opts(options, avm_config),
+         :ok <- pack_avm_deps(pack_opts),
+         :ok <- pack_priv(pack_opts),
          start_beam_file = "#{Atom.to_string(start_module)}.beam",
-         :ok <- pack_beams(Project.compile_path(), start_beam_file, "#{config[:app]}.avm") do
+         :ok <-
+           pack_beams(Project.compile_path(), start_beam_file, "#{config[:app]}.avm", pack_opts) do
       {:ok, []}
     else
       {:check, _} ->
@@ -77,16 +81,23 @@ defmodule Mix.Tasks.Atomvm.Packbeam do
     end
   end
 
-  defp pack_avm_deps() do
+  defp pack_opts(options, avm_config) do
+    [
+      include_lines:
+        Map.get(options, :include_lines, Keyword.get(avm_config, :include_lines, false))
+    ]
+  end
+
+  defp pack_avm_deps(pack_opts) do
     dep_beams = list_dep_beams()
 
     case avm_deps_path() do
       {:ok, avm_path} ->
         dep_avms = list_dep_avms(avm_path)
-        PackBEAM.make_avm(dep_beams ++ dep_avms, "deps.avm")
+        PackBEAM.make_avm(dep_beams ++ dep_avms, "deps.avm", pack_opts)
 
       {:error, :no_avm_deps_path} ->
-        PackBEAM.make_avm(dep_beams, "deps.avm")
+        PackBEAM.make_avm(dep_beams, "deps.avm", pack_opts)
     end
   end
 
@@ -109,7 +120,7 @@ defmodule Mix.Tasks.Atomvm.Packbeam do
 
   defp mix_task?(file), do: String.starts_with?(file, "Elixir.Mix.Tasks.")
 
-  defp pack_priv() do
+  defp pack_priv(pack_opts) do
     priv_dir_path =
       Project.config()[:app]
       |> Application.app_dir("priv")
@@ -132,7 +143,7 @@ defmodule Mix.Tasks.Atomvm.Packbeam do
           []
       end
 
-    PackBEAM.make_avm(packbeam_inputs, "priv.avm")
+    PackBEAM.make_avm(packbeam_inputs, "priv.avm", pack_opts)
   end
 
   defp get_all_files(dir) do
@@ -156,7 +167,7 @@ defmodule Mix.Tasks.Atomvm.Packbeam do
     regular_files ++ sub_files
   end
 
-  defp pack_beams(beams_path, start_beam_file, out) do
+  defp pack_beams(beams_path, start_beam_file, out, pack_opts) do
     start_beam = Path.join(beams_path, start_beam_file)
 
     beams_path
@@ -165,7 +176,7 @@ defmodule Mix.Tasks.Atomvm.Packbeam do
     |> Enum.map(fn file -> {file, :beam} end)
     |> List.insert_at(0, {start_beam, :beam_start})
     |> Enum.concat([{"deps.avm", :avm}, {"priv.avm", :avm}])
-    |> PackBEAM.make_avm(out)
+    |> PackBEAM.make_avm(out, pack_opts)
   end
 
   defp avm_deps_path() do
@@ -222,6 +233,10 @@ defmodule Mix.Tasks.Atomvm.Packbeam do
 
   defp parse_args([<<"--start">>, start | t], accum) do
     parse_args(t, Map.put(accum, :start, start))
+  end
+
+  defp parse_args([<<"--include_lines">> | t], accum) do
+    parse_args(t, Map.put(accum, :include_lines, true))
   end
 
   defp parse_args([_ | t], accum) do

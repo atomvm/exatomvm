@@ -33,6 +33,7 @@ defmodule ExAtomVM.MixProject do
   defp deps do
     [
       {:uf2tool, "1.1.0", runtime: false},
+      {:atomvm_packbeam, "~> 0.8.2", runtime: false},
       {:ex_doc, "~> 0.20", only: :dev, runtime: false},
       {:pythonx, "~> 0.4.0", runtime: false, optional: true},
       {:req, "~> 0.7.0", runtime: false, optional: true}
