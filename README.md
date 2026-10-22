@@ -372,13 +372,16 @@ directory its `supported_api` target writes:
 
 The `atomvm.packbeam` task is used to bundle your application into an AVM file that can be flashed to a micro-controller and executed by the AtomVM virtual machine.
 
+AVM files built by earlier ExAtomVM releases that contain priv files are rejected when the application is packed, and the task fails with a `not_a_beam_file` error: those releases marked data sections as BEAM code, which the packer no longer accepts. Rebuild such files with the current release before copying them to `avm_deps`. AVM files holding only BEAM modules, such as the AtomVM libraries, are not affected.
+
 The `atomvm` properties list in the Mix project file (`mix.exs`) may contain the following entries related to this task:
 
 | Key | Type | Default | Value |
 |-----|------|----------|-------|
 | `start` | Module | - | The name of the module containing the `start/0` entrypoint function |
+| `include_lines` | boolean | `false` | Keep line number information (the `Line` chunk) in the packed BEAM files, so that stack traces on AtomVM carry line numbers, at the cost of a bigger AVM file |
 
-Properties in the `mix.exs` file may be over-ridden on the command line using long-style flags (prefixed by `--`) by the same name as the properties key.  For example, you can use the `--start` option to specify or override the `start` property in the above table.
+Properties in the `mix.exs` file may be over-ridden on the command line using long-style flags (prefixed by `--`) by the same name as the properties key.  For example, you can use the `--start` option to specify or override the `start` property in the above table, or the `--include_lines` flag to enable the `include_lines` property.
 
 Example:
 
